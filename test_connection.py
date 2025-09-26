@@ -1,4 +1,5 @@
 import serial
+import time
 import os
 
 
@@ -25,7 +26,39 @@ def check_arduino_connection(port="/dev/ttyUSB0", baudrate=9600):
         print(f"✗ Unexpected error: {e}")
         return False
 
+def check_arduino_response(port="/dev/ttyUSB0", baudrate=9600):
+    """Check if Arduino responds to a simple command
+    Send invalid command and expect an error response
+    """
+
+    COMMAND = bytes([0xC1, 0x00, 0xFF])
+    EXPECTED_RESPONSE = bytes([0xC1, 0x00, 0xFF])
+    RESPONSE_LENGTH = len(EXPECTED_RESPONSE)
+
+    try:
+        ser = serial.Serial(port, baudrate, timeout=1)
+        time.sleep(0.1)
+        ser.reset_input_buffer()
+        ser.write(COMMAND)
+        time.sleep(0.1)  # Wait for a short period to allow the Arduino to respond
+        response = ser.read(RESPONSE_LENGTH+3)
+        ser.close()
+
+        if response == EXPECTED_RESPONSE:
+            print("✓ Arduino responded correctly")
+            return True
+        else:
+            print(f"✗ Unexpected response from Arduino: {response}")
+            return False
+    except serial.SerialException as e:
+        print(f"✗ Cannot communicate with Arduino: {e}")
+        return False
+    except Exception as e:
+        print(f"✗ Unexpected error: {e}")
+        return False
+
 if __name__ == "__main__":
-    print("Arduino Connection Check")
+    print("Arduino Check")
     print("-" * 25)
     check_arduino_connection()
+    check_arduino_response()
