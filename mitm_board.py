@@ -29,10 +29,7 @@ class MitMBoard:
         self.register_handler(NotifyEVSEChange, self._handle_notification)
         
         # Route other messages to response queue
-        self.register_handler(PEVSimCPMessage, self._handle_response)
-        self.register_handler(EVSESimCPMessage, self._handle_response)
-        self.register_handler(PlugSimPPMessage, self._handle_response)
-        self.register_handler(CableSimPPMessage, self._handle_response)
+        self.register_handler(Response, self._handle_response)
 
     async def connect(self):
         """Establish serial connection to the Arduino board."""
@@ -42,6 +39,8 @@ class MitMBoard:
             )
             logging.info(f"Successfully connected to {self.port}")
             
+            time.sleep(0.1)  # Wait for Arduino
+
             # Start the read task
             asyncio.create_task(self.read_messages())
             
@@ -69,7 +68,7 @@ class MitMBoard:
             logging.error("Serial writer is not initialized.")
 
     def send_command(self, message_type: MessageType, 
-                    start_byte: int = None, end_byte: int = None):
+                    start_byte: int = None, decision_byte: int = None, end_byte: int = None):
         """
         Convenience method to send a message by type.
         
@@ -81,6 +80,8 @@ class MitMBoard:
         kwargs = {}
         if start_byte is not None:
             kwargs['start_byte'] = start_byte
+        if decision_byte is not None:
+            kwargs['decision_byte'] = decision_byte
         if end_byte is not None:
             kwargs['end_byte'] = end_byte
             
@@ -101,7 +102,7 @@ class MitMBoard:
         while True:
             try:
                 # Read available bytes
-                data = await self.reader.read(100)  # Read up to 100 bytes
+                data = await self.reader.read(99)  # Read up to 99 bytes
                 if not data:
                     continue
                 
@@ -120,10 +121,10 @@ class MitMBoard:
                         await self._route_message(message)
                         message_buffer = message_buffer[3:]  # Remove processed bytes
                     else:
-                        # Invalid message, skip first byte and try again
+                        # Invalid message, skip three bytes and try again
                         logging.warning(f"Invalid message bytes: {potential_message.hex()}")
-                        message_buffer = message_buffer[1:]
-                        
+                        message_buffer = message_buffer[3:]
+
             except serial.SerialException as e:
                 logging.error(f"Cannot communicate with Arduino: {e}")
                 break
