@@ -31,8 +31,8 @@ def check_arduino_response(port="/dev/ttyUSB0", baudrate=9600):
     Send invalid command and expect an error response
     """
 
-    COMMAND = bytes([0xC1, 0x00, 0xFF])
-    EXPECTED_RESPONSE = bytes([0xC1, 0x00, 0xFF])
+    COMMAND = bytes([0xC2, 0x00, 0xFF])
+    EXPECTED_RESPONSE = bytes([0xB2, 0x00, 0xFF])
     RESPONSE_LENGTH = len(EXPECTED_RESPONSE)
 
     try:
@@ -44,6 +44,7 @@ def check_arduino_response(port="/dev/ttyUSB0", baudrate=9600):
         response = ser.read(RESPONSE_LENGTH+3)
         ser.close()
 
+        print(f"Sent command: {COMMAND.hex()}")
         if response == EXPECTED_RESPONSE:
             print("✓ Arduino responded correctly")
             return True

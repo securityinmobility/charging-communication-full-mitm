@@ -13,14 +13,6 @@ class ChargingState(Enum):
     E = "E"
     F = "F"
 
-class ProximityPilotResitorValue(Enum): # maybe rework
-    """
-    Resistance values between PP and PE as defined in DIN EN 61851-1:2012
-    For a short summary see: https://evsim.gonium.net/#der-proximity-plug-pp
-    """
-    #Charge32A 
-    #Charge20A
-
 
 class ChargingStation(ABC):
     def get_state(self) -> ChargingState:
@@ -43,7 +35,7 @@ class ChargingStation(ABC):
         """
         raise NotImplementedError()
 
-    def get_max_charge_current(self) -> ProximityPilotResitorValue:
+    def get_max_charge_current(self): # -> ProximityPilotResitorValue:
         """
         Get the current resistance between PP and PE in Ohms, which defines the maximum current of the cable.
         This value is usually ignored in ISO15118 use cases, but important for AC charging stations.
@@ -109,7 +101,7 @@ class ElectricVehicle(ABC):
         else:
             return round((dutycycle - 64) * 2.5)
 
-    def set_max_charge_current(self, resistance: Optional[ProximityPilotResitorValue]):
+    def set_max_charge_current(self, resistance): #Optional[ProximityPilotResitorValue]):
         """
         Set the maximum charge current communicated to the vehicle through the
         resistor between PP and PE.

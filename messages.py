@@ -1,6 +1,8 @@
 from enum import IntEnum
 from typing import Optional, Type, Dict
 
+from base_classes import ChargingState
+
 class MessageType(IntEnum):
     """Enumeration for message types based on decision byte."""
     PEV_SIM_CP = 0xC1
@@ -8,7 +10,6 @@ class MessageType(IntEnum):
     EVSE_SIM_PP = 0xC3
     PEV_SIM_PP = 0xC4
     Error = 0xFE
-
     
 class ResponseType(IntEnum):
     """Enumeration for response types based on decision byte."""
@@ -23,11 +24,33 @@ class ResponseType(IntEnum):
     ACK_PEV_SIM_PP = 0xB4
     NACK_PEV_SIM_PP = 0xE4
 
+class PP_State_EVSEsim(IntEnum): # maybe rework
+    """
+    Resistance values between PP and PE as defined in DIN EN 61851-1:2012
+    For a short summary see: https://evsim.gonium.net/#der-proximity-plug-pp
+    """
+    NO_PLUG_CONNECTED = 0
+    PLUG_CONNECTED = 1
+    NO_SIGNAL = 2
+    USER_REQUEST_STOP_CHARGING = 3
+
+class PP_State_PEVsim(IntEnum): # maybe rework
+    """
+    Resistance values between PP and PE as defined in DIN EN 61851-1:2012
+    For a short summary see: https://evsim.gonium.net/#der-proximity-plug-pp
+    """
+    NO_CABLE_CONNECTED = 0
+    CHARGE_20A = 1
+    CHARGE_32A = 2
+    INVALID = 3
+
 class Message:
     """Base message class."""
     END_BYTE = 0xFF
 
-    def __init__(self, messageType_byte: MessageType, decision_byte: int, end_byte: int, ACK: ResponseType, NACK: ResponseType):
+    def __init__(self, messageType_byte: MessageType, decision_byte: int, 
+                 end_byte: int | None = None, ACK: ResponseType | None = None, 
+                 NACK: ResponseType | None = None):
         self.messageType_byte = messageType_byte
         self.decision_byte = decision_byte
         self.end_byte = end_byte
@@ -64,21 +87,102 @@ class PEVSimCPMessage(Message):
     ACK_RESPONSE = ResponseType.ACK_PEV_SIM_CP
     NACK_RESPONSE = ResponseType.NACK_PEV_SIM_CP
 
-    def __init__(self, messageType_byte: MessageType = MESSAGE_TYPE, 
-                 decision_byte: int = 0x00, 
-                 end_byte: int = Message.END_BYTE):
-        super().__init__(messageType_byte, decision_byte, end_byte)
+    protocol_dict = {   # State: (Hex, Description)
+        'A': (0x00, "No EV connected"),
+        'B': (0x01, "EV connected"),
+        'C': (0x03, "EV ready"),
+        'D': (0x05, "EV ready + vent. req."),
+        'E': (0x18, "Error (short circuit)"),
+        'F': (0xFE, "Error (-12V)"),
+    }
+
+    def __init__(self, decision_byte: int | None = None, 
+                 cp_state: ChargingState = ChargingState.A):
+
+        if decision_byte is None:
+            if cp_state not in ChargingState:
+                raise ValueError(f"Invalid state: {cp_state}")
+            else:
+                decision_byte = self.protocol_dict[cp_state.name][0]
+
+        self.cp_state = cp_state
+
+        super().__init__(self.MESSAGE_TYPE, decision_byte, Message.END_BYTE, self.ACK_RESPONSE, self.NACK_RESPONSE)
+
+    def set_state(self, cp_state: ChargingState):
+        """Set the state of the simulated PEV CP Pin."""
+        if cp_state in ChargingState:
+            self.cp_state = cp_state
+            self.decision_byte = self.protocol_dict[cp_state.name][0]
+        else:
+            raise ValueError(f"Invalid state: {cp_state}")
+
+    def get_state(self) -> ChargingState:
+        """Get the current state of the simulated PEV CP Pin."""
+        return self.cp_state
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'PEVSimCPMessage':
+        if len(data) != 3:
+            raise ValueError(f"Invalid message length: {len(data)}")
+        if data[0] != cls.MESSAGE_TYPE or data[2] != cls.END_BYTE:
+            raise ValueError("Invalid message format")
+        
+        decision_byte = data[1]
+        return cls(decision_byte=decision_byte)
 
 class EVSESimCPMessage(Message):
-    """Message to control the simulated EVSE CP Pin."""
+    """Message to control the simulated EVSE CP Pin.
+    
+    duty_cycle | Description                | resulting signal
+    -------------------------------------------------
+    0          | No signal / not connected  | 0V
+    1 - 99     | Command                    | PWM +12V to -12V with duty cycle 1% to 99%
+    100        | waiting for EV to connect  | DC +12V
+    """
     MESSAGE_TYPE = MessageType.EVSE_SIM_CP
     ACK_RESPONSE = ResponseType.ACK_EVSE_SIM_CP
-    NACK_RESPONSE = ResponseType.NACK_EVSE_SIM_CP
+    NACK_RESPONSE = ResponseType.NACK_EVSE_SIM_CP   
 
-    def __init__(self, messageType_byte: MessageType = MESSAGE_TYPE, 
-                 decision_byte: int = 0x00, 
-                 end_byte: int = Message.END_BYTE):
-        super().__init__(messageType_byte, decision_byte, end_byte)
+    def __init__(self, decision_byte: int | None = None, 
+                 duty_cycle: int | None = None):
+
+        if decision_byte is None:
+            if duty_cycle is None:
+                decision_byte = 0x00  # Default to no signal
+                duty_cycle = 0
+            
+            if 0 <= duty_cycle <= 100:
+                self.duty_cycle = duty_cycle
+                decision_byte = duty_cycle
+            else:
+                raise ValueError("Duty cycle must be between 0 and 100")
+
+            self.duty_cycle = duty_cycle
+        super().__init__(self.MESSAGE_TYPE, decision_byte, self.END_BYTE, self.ACK_RESPONSE, self.NACK_RESPONSE)
+
+    def set_duty_cycle(self, duty_cycle: int):
+        """Set the duty cycle of the simulated EVSE CP Pin."""
+
+        if 0 <= duty_cycle <= 100:
+            self.duty_cycle = duty_cycle
+            self.decision_byte = duty_cycle
+        else:
+            raise ValueError("Duty cycle must be between 0 and 100")
+
+    def get_duty_cycle(self) -> int:
+        """Get the current duty cycle of the simulated EVSE CP Pin."""
+        return self.duty_cycle
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'EVSESimCPMessage':
+        if len(data) != 3:
+            raise ValueError(f"Invalid message length: {len(data)}")
+        if data[0] != cls.MESSAGE_TYPE or data[2] != cls.END_BYTE:
+            raise ValueError("Invalid message format")
+        
+        decision_byte = data[1]
+        return cls(decision_byte=decision_byte)
 
 class EVSESimPPMessage(Message):
     """Message to control the simulated EVSE PP Pin."""
@@ -86,10 +190,30 @@ class EVSESimPPMessage(Message):
     ACK_RESPONSE = ResponseType.ACK_EVSE_SIM_PP
     NACK_RESPONSE = ResponseType.NACK_EVSE_SIM_PP
 
-    def __init__(self, messageType_byte: MessageType = MESSAGE_TYPE, 
-                 decision_byte: int = 0x00, 
-                 end_byte: int = Message.END_BYTE):
-        super().__init__(messageType_byte, decision_byte, end_byte)
+    def __init__(self, decision_byte: int | None = None,
+                pp_state: PP_State_EVSEsim | None = None):
+
+        if decision_byte is None:
+            if pp_state is None:
+                decision_byte = 0x00  # Default to no plug connected
+                pp_state = PP_State_EVSEsim.NO_PLUG_CONNECTED
+            else:
+                if pp_state not in PP_State_EVSEsim:
+                    raise ValueError(f"Invalid PP state: {pp_state}")
+                decision_byte = pp_state.value
+
+            self.pp_state = pp_state
+        super().__init__(self.MESSAGE_TYPE, decision_byte, Message.END_BYTE, self.ACK_RESPONSE, self.NACK_RESPONSE)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'EVSESimPPMessage':
+        if len(data) != 3:
+            raise ValueError(f"Invalid message length: {len(data)}")
+        if data[0] != cls.MESSAGE_TYPE or data[2] != cls.END_BYTE:
+            raise ValueError("Invalid message format")
+        
+        decision_byte = data[1]
+        return cls(decision_byte=decision_byte)
 
 class PEVSimPPMessage(Message):
     """Message to control the simulated PEV PP Pin."""
@@ -97,32 +221,72 @@ class PEVSimPPMessage(Message):
     ACK_RESPONSE = ResponseType.ACK_PEV_SIM_PP
     NACK_RESPONSE = ResponseType.NACK_PEV_SIM_PP
 
-    def __init__(self, messageType_byte: MessageType = MESSAGE_TYPE, 
-                 decision_byte: int = 0x00, 
-                 end_byte: int = Message.END_BYTE):
-        super().__init__(messageType_byte, decision_byte, end_byte)
+    def __init__(self, decision_byte: int | None = None, 
+                 pp_state: PP_State_PEVsim | None = None):
+
+        if decision_byte is None:
+            if pp_state is None:
+                decision_byte = 0x00  # Default to no cable connected
+                pp_state = PP_State_PEVsim.NO_CABLE_CONNECTED
+            else:
+                if pp_state not in PP_State_PEVsim:
+                    raise ValueError(f"Invalid PP state: {pp_state}")
+                decision_byte = pp_state.value
+
+            self.pp_state = pp_state
+        super().__init__(self.MESSAGE_TYPE, decision_byte, Message.END_BYTE, self.ACK_RESPONSE, self.NACK_RESPONSE)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'PEVSimPPMessage':
+        if len(data) != 3:
+            raise ValueError(f"Invalid message length: {len(data)}")
+        if data[0] != cls.MESSAGE_TYPE or data[2] != cls.END_BYTE:
+            raise ValueError("Invalid message format")
+        
+        decision_byte = data[1]
+        return cls(decision_byte=decision_byte)
 
 class NotifyPEVSimChange(Message):
     """Notification for PEV state change."""
     MESSAGE_TYPE = ResponseType.NOTIFY_PEV_SIM_CHANGE
 
-    def __init__(self, messageType_byte: MessageType = MESSAGE_TYPE, 
-                 decision_byte: int = 0x00, 
-                 end_byte: int = Message.END_BYTE):
-        super().__init__(messageType_byte, decision_byte, end_byte)
+    def __init__(self, decision_byte: int | None = None,
+                 duty_cycle: int | None = None):
+
+        super().__init__(self.MESSAGE_TYPE, decision_byte, Message.END_BYTE)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'NotifyPEVSimChange':
+        if len(data) != 3:
+            raise ValueError(f"Invalid message length: {len(data)}")
+        if data[0] != cls.MESSAGE_TYPE or data[2] != cls.END_BYTE:
+            raise ValueError("Invalid message format")
+        
+        decision_byte = data[1]
+        return cls(decision_byte=decision_byte)
 
 class NotifyEVSESimChange(Message):
     """Notification for EVSE state change."""
     MESSAGE_TYPE = ResponseType.NOTIFY_EVSE_SIM_CHANGE
 
     def __init__(self, messageType_byte: MessageType = MESSAGE_TYPE, 
-                 decision_byte: int = 0x00, 
-                 end_byte: int = Message.END_BYTE):
-        super().__init__(messageType_byte, decision_byte, end_byte)
+                 decision_byte: int | None = None,
+                 end_byte: int | None = None):
+        super().__init__(self.MESSAGE_TYPE, decision_byte, end_byte)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'NotifyEVSESimChange':
+        if len(data) != 3:
+            raise ValueError(f"Invalid message length: {len(data)}")
+        if data[0] != cls.MESSAGE_TYPE or data[2] != cls.END_BYTE:
+            raise ValueError("Invalid message format")
+        
+        decision_byte = data[1]
+        return cls(decision_byte=decision_byte)
 
 class Response(Message):
     """Response class."""
-    def __init__(self, responseType_byte: ResponseType, decision_byte: int, end_byte: int):
+    def __init__(self, responseType_byte: ResponseType, decision_byte: int | None = None, end_byte: int | None = None):
         super().__init__(responseType_byte, decision_byte, end_byte)
 
 class ErrorMessage(Message):
@@ -143,9 +307,9 @@ class MessageFactory:
         MessageType.EVSE_SIM_CP: EVSESimCPMessage,
         MessageType.EVSE_SIM_PP: EVSESimPPMessage,
         MessageType.PEV_SIM_PP: PEVSimPPMessage,
-        MessageType.NOTIFY_PEV_SIM_CHANGE: NotifyPEVSimChange,
-        MessageType.NOTIFY_EVSE_SIM_CHANGE: NotifyEVSESimChange,
         MessageType.Error: ErrorMessage,
+        ResponseType.NOTIFY_PEV_SIM_CHANGE: NotifyPEVSimChange,
+        ResponseType.NOTIFY_EVSE_SIM_CHANGE: NotifyEVSESimChange,
         ResponseType.ACK_PEV_SIM_CP: Response,
         ResponseType.NACK_PEV_SIM_CP: Response,
         ResponseType.ACK_EVSE_SIM_CP: Response,
@@ -170,35 +334,35 @@ class MessageFactory:
         if len(data) != 3:
             return None
             
-        decision_byte = data[1]
-        message_class = cls._message_registry.get(decision_byte)
-        
+        message_typeByte = data[0]
+        message_class = cls._message_registry.get(message_typeByte)
+
         if message_class:
             return message_class.from_bytes(data)
         return None
     
     @classmethod
-    def create_by_type(cls, message_type: MessageType, 
-                      messageType_byte: int = Message.messageType_byte,
+    def create_by_type(cls, messageType_byte: MessageType | ResponseType, 
+                      decision_byte: int = 0x00,
                       end_byte: int = Message.END_BYTE) -> Optional[Message]:
         """
         Create a message by its type.
         
         Args:
-            message_type: The type of message to create
-            messageType_byte: Optional start byte override
+            messageType_byte: The type of message to create
+            decision_byte: Optional decision byte override
             end_byte: Optional end byte override
             
         Returns:
             Specific Message subclass instance or None if invalid type
         """
-        message_class = cls._message_registry.get(message_type)
+        message_class = cls._message_registry.get(messageType_byte)
         if message_class:
-            return message_class(messageType_byte, message_type, end_byte)
+            return message_class(decision_byte=decision_byte)
         return None
     
     @classmethod
-    def register_message_type(cls, decision_byte: int, 
+    def register_message_type(cls, messageType_byte: int, 
                              message_class: Type[Message]):
         """
         Register a new message type in the factory.
@@ -207,4 +371,4 @@ class MessageFactory:
             decision_byte: The byte that identifies this message type
             message_class: The Message subclass to instantiate
         """
-        cls._message_registry[decision_byte] = message_class
+        cls._message_registry[messageType_byte] = message_class

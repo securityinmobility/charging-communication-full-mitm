@@ -4,7 +4,7 @@ import os
 import logging
 
 from mitm_board import MitMBoard
-from messages import Message
+from messages import Message, MessageType, ResponseType
 
 logging.basicConfig(level=logging.INFO)
 
@@ -22,7 +22,7 @@ async def main():
         board.send_command(message_type=MessageType.PEV_SIM_CP, decision_byte=0x01)
         
         # Wait for response
-        response = await board.wait_for_response(timeout=0.5)
+        response = await board.wait_for_response(timeout=1)
         if response:
             print(f"Got response: {response.__class__.__name__}")
             if response.decision_byte == ResponseType.ACK_PEV_SIM_CP:

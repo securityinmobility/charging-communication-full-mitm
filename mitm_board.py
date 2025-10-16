@@ -1,9 +1,10 @@
+import time
 import asyncio
 import logging
 import serial
 import serial_asyncio
-from typing import Optional, Dict, Callable
-from messages import Message, MessageFactory, MessageType
+from typing import Optional, Dict, Callable, Coroutine, Any
+from messages import Message, MessageFactory, MessageType, ResponseType, NotifyPEVSimChange, NotifyEVSESimChange, Response
 
 class MitMBoard:
     def __init__(self, port="/dev/ttyUSB0", baudrate=9600):
@@ -25,9 +26,9 @@ class MitMBoard:
     def _setup_default_routing(self):
         """Setup default message routing based on message types."""
         # Route notification messages to notification queue
-        self.register_handler(NotifyPEVChange, self._handle_notification)
-        self.register_handler(NotifyEVSEChange, self._handle_notification)
-        
+        self.register_handler(NotifyPEVSimChange, self._handle_notification)
+        self.register_handler(NotifyEVSESimChange, self._handle_notification)
+
         # Route other messages to response queue
         self.register_handler(Response, self._handle_response)
 
@@ -42,7 +43,7 @@ class MitMBoard:
             time.sleep(0.1)  # Wait for Arduino
 
             # Start the read task
-            asyncio.create_task(self.read_messages())
+            asyncio.create_task(self.read_message())
             
         except serial.SerialException as e:
             logging.error(f"Cannot communicate with Arduino: {e}")
@@ -68,7 +69,7 @@ class MitMBoard:
             logging.error("Serial writer is not initialized.")
 
     def send_command(self, message_type: MessageType, 
-                    start_byte: int = None, decision_byte: int = None, end_byte: int = None):
+                     decision_byte: int = None):
         """
         Convenience method to send a message by type.
         
@@ -78,12 +79,9 @@ class MitMBoard:
             end_byte: Optional end byte override
         """
         kwargs = {}
-        if start_byte is not None:
-            kwargs['start_byte'] = start_byte
+        
         if decision_byte is not None:
             kwargs['decision_byte'] = decision_byte
-        if end_byte is not None:
-            kwargs['end_byte'] = end_byte
             
         message = MessageFactory.create_by_type(message_type, **kwargs)
         if message:
@@ -154,13 +152,16 @@ class MitMBoard:
         logging.info(f"Received notification: {message.__class__.__name__}")
         await self.notification_queue.put(message)
 
+        # Extension point: add setting of the information on the board
+        # Extension point: add functionality to automatically "pass through" signals
+
     async def _handle_response(self, message: Message):
         """Handle response messages."""
         logging.info(f"Received response: {message.__class__.__name__}")
         await self.response_queue.put(message)
 
     def register_handler(self, message_class: type, 
-                        handler: Callable[[Message], asyncio.Coroutine]):
+                     handler: Callable[[Message], Coroutine[Any, Any, None]]):
         """
         Register a custom handler for a specific message type.
         
