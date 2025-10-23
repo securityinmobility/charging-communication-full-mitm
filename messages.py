@@ -1,7 +1,9 @@
 from enum import IntEnum
 from typing import Optional, Type, Dict
+import logging
 
-from base_classes import ChargingState
+# get logger for this modeule
+logger = logging.getLogger(__name__)
 
 class MessageType(IntEnum):
     """Enumeration for message types based on decision byte."""
@@ -9,7 +11,7 @@ class MessageType(IntEnum):
     EVSE_SIM_CP = 0xC2
     EVSE_SIM_PP = 0xC3
     PEV_SIM_PP = 0xC4
-    Error = 0xFE
+    ERROR = 0xFE
     
 class ResponseType(IntEnum):
     """Enumeration for response types based on decision byte."""
@@ -23,6 +25,19 @@ class ResponseType(IntEnum):
     NACK_EVSE_SIM_PP = 0xE3
     ACK_PEV_SIM_PP = 0xB4
     NACK_PEV_SIM_PP = 0xE4
+
+class ChargingState(IntEnum):
+    """
+    Charging state as described in DIN EN 61851-1:2012
+    For a short summary see: https://evsim.gonium.net/#der-control-pilot-cp
+    On the CP line between PEV and EVSE -> PEV Sim CP / EVSE measurement change
+    """
+    A = 0
+    B = 1
+    C = 3
+    D = 5
+    E = 24
+    F = 255
 
 class PP_State_EVSEsim(IntEnum): # maybe rework
     """
@@ -291,12 +306,11 @@ class Response(Message):
 
 class ErrorMessage(Message):
     """Error message class."""
-    MESSAGE_TYPE = MessageType.Error
+    MESSAGE_TYPE = MessageType.ERROR
 
-    def __init__(self, messageType_byte: int = MESSAGE_TYPE, 
-                 decision_byte: int = 0xFE, 
-                 end_byte: int = Message.END_BYTE):
-        super().__init__(messageType_byte, decision_byte, end_byte)
+    def __init__(self, decision_byte):
+        logger.debug(f"decision_byte unused in ErrorMessage")
+        super().__init__(self.MESSAGE_TYPE, 0xFE, Message.END_BYTE)
 
 class MessageFactory:
     """Factory class for creating specific message types from bytes."""
@@ -307,7 +321,7 @@ class MessageFactory:
         MessageType.EVSE_SIM_CP: EVSESimCPMessage,
         MessageType.EVSE_SIM_PP: EVSESimPPMessage,
         MessageType.PEV_SIM_PP: PEVSimPPMessage,
-        MessageType.Error: ErrorMessage,
+        MessageType.ERROR: ErrorMessage,
         ResponseType.NOTIFY_PEV_SIM_CHANGE: NotifyPEVSimChange,
         ResponseType.NOTIFY_EVSE_SIM_CHANGE: NotifyEVSESimChange,
         ResponseType.ACK_PEV_SIM_CP: Response,

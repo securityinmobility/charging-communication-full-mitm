@@ -37,26 +37,28 @@ def check_arduino_response(port="/dev/ttyUSB0", baudrate=9600):
 
     try:
         ser = serial.Serial(port, baudrate, timeout=1)
-        time.sleep(0.1)
+        time.sleep(0.2)
         ser.reset_input_buffer()
         ser.write(COMMAND)
-        time.sleep(0.1)  # Wait for a short period to allow the Arduino to respond
-        response = ser.read(RESPONSE_LENGTH+3)
-        ser.close()
+        response = ser.read(RESPONSE_LENGTH+6)
 
         print(f"Sent command: {COMMAND.hex()}")
         if response == EXPECTED_RESPONSE:
             print("✓ Arduino responded correctly")
-            return True
         else:
             print(f"✗ Unexpected response from Arduino: {response}")
-            return False
+            ser.write(COMMAND)
+            response = ser.read(RESPONSE_LENGTH+3)
+            print("Response after command re-sent:", response)
     except serial.SerialException as e:
         print(f"✗ Cannot communicate with Arduino: {e}")
         return False
     except Exception as e:
         print(f"✗ Unexpected error: {e}")
         return False
+    finally:
+        if 'ser' in locals() and ser.is_open:
+            ser.close()
 
 if __name__ == "__main__":
     print("Arduino Check")

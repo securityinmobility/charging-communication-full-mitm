@@ -1,18 +1,6 @@
 from abc import ABC
-from enum import Enum
-
-class ChargingState(Enum):
-    """
-    Charging state as described in DIN EN 61851-1:2012
-    For a short summary see: https://evsim.gonium.net/#der-control-pilot-cp
-    """
-    A = "A"
-    B = "B"
-    C = "C"
-    D = "D"
-    E = "E"
-    F = "F"
-
+from enum import IntEnum
+from messages import ChargingState
 
 class ChargingStation(ABC):
     def get_state(self) -> ChargingState:
@@ -57,7 +45,6 @@ class ChargingStation(ABC):
             self.set_pwm_duty_cycle(current / 2.5 + 64)
         else:
             raise ValueError("Charge current cannot be higher than 80A")
-
 
 class ElectricVehicle(ABC):
     def get_state(self) -> ChargingState:

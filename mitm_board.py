@@ -4,7 +4,10 @@ import logging
 import serial
 import serial_asyncio
 from typing import Optional, Dict, Callable, Coroutine, Any
-from messages import Message, MessageFactory, MessageType, ResponseType, NotifyPEVSimChange, NotifyEVSESimChange, Response
+from messages import *
+
+# get logger for this modeule
+logger = logging.getLogger(__name__)
 
 class MitMBoard:
     def __init__(self, port="/dev/ttyUSB0", baudrate=9600):
@@ -12,6 +15,16 @@ class MitMBoard:
         self.baudrate = baudrate
         self.reader = None
         self.writer = None
+
+        self.EVSE_CP_state = 0 # PWM duty cycle in %
+        self.EVSE_PP_state = None
+        self.PEV_CP_state = ChargingState.A
+        self.PEV_PP_state = None
+
+        self.EVSE_SIM_CP_state = 0 # PWM duty cycle in %
+        self.EVSE_SIM_PP_state = PP_State_EVSEsim.NO_PLUG_CONNECTED
+        self.PEV_SIM_CP_state = ChargingState.A
+        self.PEV_SIM_PP_state = PP_State_PEVsim.NO_CABLE_CONNECTED
 
         # Queues for different message types
         self.response_queue = asyncio.Queue()
@@ -38,9 +51,8 @@ class MitMBoard:
             self.reader, self.writer = await serial_asyncio.open_serial_connection(
                 url=self.port, baudrate=self.baudrate
             )
-            logging.info(f"Successfully connected to {self.port}")
-            
-            time.sleep(0.1)  # Wait for Arduino
+            logger.info(f"Successfully connected to {self.port}")
+            time.sleep(0.2)  # Wait for Arduino
 
             # Start the read task
             asyncio.create_task(self.read_message())
@@ -60,13 +72,13 @@ class MitMBoard:
             try:
                 data = message.to_bytes()
                 self.writer.write(data)
-                logging.debug(f"Sent message: {data.hex()}")
+                logger.debug(f"Sent message: {data.hex()}")
             except serial.SerialException as e:
-                logging.error(f"Cannot communicate with Arduino: {e}")
+                logger.error(f"Cannot communicate with Arduino: {e}")
             except Exception as e:
-                logging.error(f"Unexpected error: {e}")
+                logger.error(f"Unexpected error: {e}")
         else:
-            logging.error("Serial writer is not initialized.")
+            logger.error("Serial writer is not initialized.")
 
     def send_command(self, message_type: MessageType, 
                      decision_byte: int = None):
@@ -92,7 +104,7 @@ class MitMBoard:
     async def read_message(self):
         """Continuously read and process messages from the Arduino."""
         if not self.reader:
-            logging.error("Serial reader is not initialized.")
+            logger.error("Serial reader is not initialized.")
             return
 
         message_buffer = bytearray()
@@ -110,24 +122,25 @@ class MitMBoard:
                 while len(message_buffer) >= 3:
                     # Extract potential message
                     potential_message = bytes(message_buffer[:3])
-                    
+                    logger.debug(f"Received potential message: {potential_message.hex()}")
+
                     # Try to parse the message
                     message = MessageFactory.create_from_bytes(potential_message)
-                    
+                    logger.debug(f"Parsed message: {type(message)}")
                     if message:
                         # Valid message found
                         await self._route_message(message)
                         message_buffer = message_buffer[3:]  # Remove processed bytes
                     else:
                         # Invalid message, skip three bytes and try again
-                        logging.warning(f"Invalid message bytes: {potential_message.hex()}")
+                        logger.warning(f"Invalid message bytes: {potential_message.hex()}")
                         message_buffer = message_buffer[3:]
 
             except serial.SerialException as e:
-                logging.error(f"Cannot communicate with Arduino: {e}")
+                logger.error(f"Cannot communicate with Arduino: {e}")
                 break
             except Exception as e:
-                logging.error(f"Unexpected error in read loop: {e}")
+                logger.error(f"Unexpected error in read loop: {e}")
                 break
 
     async def _route_message(self, message: Message):
@@ -143,13 +156,13 @@ class MitMBoard:
         if handler:
             await handler(message)
         else:
-            logging.warning(f"No handler registered for {message_type.__name__}")
+            logger.warning(f"No handler registered for {message_type.__name__}")
             # Default: put in response queue
             await self.response_queue.put(message)
 
     async def _handle_notification(self, message: Message):
         """Handle notification messages."""
-        logging.info(f"Received notification: {message.__class__.__name__}")
+        logger.info(f"Received notification: {message.__class__.__name__}")
         await self.notification_queue.put(message)
 
         # Extension point: add setting of the information on the board
@@ -157,7 +170,7 @@ class MitMBoard:
 
     async def _handle_response(self, message: Message):
         """Handle response messages."""
-        logging.info(f"Received response: {message.__class__.__name__}")
+        logger.info(f"Received response: {message.__class__.__name__} {message.to_bytes().hex()}")
         await self.response_queue.put(message)
 
     def register_handler(self, message_class: type, 
@@ -187,7 +200,7 @@ class MitMBoard:
                 timeout=timeout
             )
         except asyncio.TimeoutError:
-            logging.warning(f"Response timeout after {timeout} seconds")
+            logger.warning(f"Response timeout after {timeout} seconds")
             return None
 
     async def wait_for_notification(self, timeout: float = None) -> Optional[Message]:
