@@ -30,21 +30,6 @@ class MitMBoard:
         self.response_queue = asyncio.Queue()
         self.notification_queue = asyncio.Queue()
 
-        # Message handlers by type
-        self.message_handlers: Dict[type, Callable] = {}
-
-        # Setup default routing
-        self._setup_default_routing()
-
-    def _setup_default_routing(self):
-        """Setup default message routing based on message types."""
-        # Route notification messages to notification queue
-        self.register_handler(NotifyPEVSimChange, self._handle_notification)
-        self.register_handler(NotifyEVSESimChange, self._handle_notification)
-
-        # Route other messages to response queue
-        self.register_handler(Response, self._handle_response)
-
     async def connect(self):
         """Establish serial connection to the Arduino board."""
         try:
@@ -70,7 +55,7 @@ class MitMBoard:
         """
         if self.writer:
             try:
-                data = message.to_bytes()
+                data = MessageLogic.to_bytes(message)
                 self.writer.write(data)
                 logger.debug(f"Sent message: {data.hex()}")
             except serial.SerialException as e:
@@ -79,27 +64,6 @@ class MitMBoard:
                 logger.error(f"Unexpected error: {e}")
         else:
             logger.error("Serial writer is not initialized.")
-
-    def send_command(self, message_type: MessageType, 
-                     decision_byte: int = None):
-        """
-        Convenience method to send a message by type.
-        
-        Args:
-            message_type: Type of message to send
-            start_byte: Optional start byte override
-            end_byte: Optional end byte override
-        """
-        kwargs = {}
-        
-        if decision_byte is not None:
-            kwargs['decision_byte'] = decision_byte
-            
-        message = MessageFactory.create_by_type(message_type, **kwargs)
-        if message:
-            self.send_message(message)
-        else:
-            logging.error(f"Failed to create message of type {message_type}")
 
     async def read_message(self):
         """Continuously read and process messages from the Arduino."""
@@ -119,19 +83,18 @@ class MitMBoard:
                 message_buffer.extend(data)
                 
                 # Process complete messages (assuming 3-byte messages)
+                # TODO: Add logic for faulty message lengths
                 while len(message_buffer) >= 3:
                     # Extract potential message
                     potential_message = bytes(message_buffer[:3])
                     logger.debug(f"Received potential message: {potential_message.hex()}")
 
-                    # Try to parse the message
-                    message = MessageFactory.create_from_bytes(potential_message)
-                    logger.debug(f"Parsed message: {type(message)}")
-                    if message:
-                        # Valid message found
+                    try:
+                        message = MessageLogic.from_bytes(potential_message)
+                        logger.debug(f"Parsed message: {type(message)}")
                         await self._route_message(message)
                         message_buffer = message_buffer[3:]  # Remove processed bytes
-                    else:
+                    except ValueError:
                         # Invalid message, skip three bytes and try again
                         logger.warning(f"Invalid message bytes: {potential_message.hex()}")
                         message_buffer = message_buffer[3:]
@@ -150,14 +113,10 @@ class MitMBoard:
         Args:
             message: The parsed message to route
         """
-        message_type = type(message)
-        handler = self.message_handlers.get(message_type)
-        
-        if handler:
-            await handler(message)
+        if message.messageType_byte in [ResponseType.NOTIFY_PEV_SIM_CHANGE,
+                                         ResponseType.NOTIFY_EVSE_SIM_CHANGE]:
+            await self._handle_notification(message)
         else:
-            logger.warning(f"No handler registered for {message_type.__name__}")
-            # Default: put in response queue
             await self.response_queue.put(message)
 
     async def _handle_notification(self, message: Message):
@@ -170,21 +129,10 @@ class MitMBoard:
 
     async def _handle_response(self, message: Message):
         """Handle response messages."""
-        logger.info(f"Received response: {message.__class__.__name__} {message.to_bytes().hex()}")
+        logger.info(f"Received response: {message.to_bytes().hex()}")
         await self.response_queue.put(message)
 
-    def register_handler(self, message_class: type, 
-                     handler: Callable[[Message], Coroutine[Any, Any, None]]):
-        """
-        Register a custom handler for a specific message type.
-        
-        Args:
-            message_class: The Message subclass to handle
-            handler: Async function to handle the message
-        """
-        self.message_handlers[message_class] = handler
-
-    async def wait_for_response(self, timeout: float = 5.0) -> Optional[Message]:
+    async def wait_for_response(self, timeout: float = 2.0) -> Optional[Message]:
         """
         Wait for a response message with timeout.
         
