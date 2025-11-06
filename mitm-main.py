@@ -20,15 +20,15 @@ def setup_logging(level=logging.INFO, log_file='mitm.log'):
 async def test_messages(board: MitMBoard):
     """Test message creation and responses."""
     # Create a test message
-    message1 = MessageFactory.create_by_type(MessageType.PEV_SIM_CP, decision_byte=0x20)
+    message1 = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=0x20)
     if message1 is None: logging.error("Failed to create message1")
-    message2 = MessageFactory.create_by_type(MessageType.EVSE_SIM_CP, decision_byte=0x00)
+    message2 = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=0x00)
     if message2 is None: logging.error("Failed to create message2")
-    message3 = MessageFactory.create_by_type(MessageType.EVSE_SIM_PP, decision_byte=0x00)
+    message3 = Message(messageType="EVSE_SIM_PP", messageType_byte=MessageType.EVSE_SIM_PP, decision_byte=0x00)
     if message3 is None: logging.error("Failed to create message3")
-    message4 = MessageFactory.create_by_type(MessageType.PEV_SIM_PP, decision_byte=0x00)
+    message4 = Message(messageType="PEV_SIM_PP", messageType_byte=MessageType.PEV_SIM_PP, decision_byte=0x00)
     if message4 is None: logging.error("Failed to create message4")
-    error_msg = MessageFactory.create_by_type(MessageType.ERROR)
+    error_msg = Message(messageType="ERROR", messageType_byte=MessageType.ERROR, decision_byte=None)
     if error_msg is None: logging.error("Failed to create error_msg")
     
     # Send the test messages and check for responses
@@ -96,17 +96,10 @@ async def main():
         """
         await test_messages(board)
 
-        # Listen for notifications
-        #notification_task = asyncio.create_task(
-        #    board.wait_for_notification()
-        #)
         notification = await board.wait_for_notification()
         logger.info(f"Received notification: {notification.__class__.__name__}")
         notification = await board.wait_for_notification()
         logger.info(f"Received notification: {notification.__class__.__name__}")
-        # Run for a while to demonstrate
-        #await asyncio.sleep(10)
-
         
     finally:
         board.close()

@@ -64,6 +64,7 @@ class PP_State_PEVsim(IntEnum): # maybe rework
 @dataclass
 class Message:
     """Base message class."""
+    messageType: str
     messageType_byte: int
     decision_byte: Optional[int]
     end_byte: int = 0xFF # End byte is always 0xFF
@@ -91,14 +92,27 @@ class MessageLogic:
     @staticmethod 
     def from_bytes(data: bytes) -> 'Message':
         """Create a message instance from bytes."""
-        if len(data) < 3:
+        if len(data) != 3:
             raise ValueError(f"Invalid message length: {len(data)}")
-        return Message(data[0], data[1], data[2])
+
+        MessageType_str = MessageLogic.get_message_type(data[0])
+        if MessageType_str is None:
+            raise ValueError(f"Unknown message type byte: {data[0]}")
+
+        return Message(messageType=MessageType_str, messageType_byte=data[0], decision_byte=data[1], end_byte=data[2])
     
     @staticmethod
     def to_bytes(message: 'Message') -> bytes:
         """Convert a message instance to bytes."""
         return bytes([message.messageType_byte, message.decision_byte if message.decision_byte is not None else 0x00, message.end_byte])
+    
+    @staticmethod
+    def get_message_type(type_byte: int) -> Optional[str]:
+        """Get the message type string from the type byte."""
+        for key, (msg_type, _, _) in MessageLogic.message_types.items():
+            if msg_type == type_byte:
+                return key
+        return None
     
     @staticmethod
     def check_response(data: bytes) -> bool:

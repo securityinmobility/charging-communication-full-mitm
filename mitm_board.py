@@ -6,7 +6,7 @@ import serial_asyncio
 from typing import Optional, Dict, Callable, Coroutine, Any
 from messages import *
 
-# get logger for this modeule
+# get logger for this module
 logger = logging.getLogger(__name__)
 
 class MitMBoard:
@@ -15,6 +15,8 @@ class MitMBoard:
         self.baudrate = baudrate
         self.reader = None
         self.writer = None
+
+        self.pass_through_enabled = False
 
         self.EVSE_CP_state = 0 # PWM duty cycle in %
         self.EVSE_PP_state = None
@@ -29,6 +31,9 @@ class MitMBoard:
         # Queues for different message types
         self.response_queue = asyncio.Queue()
         self.notification_queue = asyncio.Queue()
+
+    def set_pass_through(self, enabled: bool):
+        self.pass_through_enabled = enabled
 
     async def connect(self):
         """Establish serial connection to the Arduino board."""
@@ -115,6 +120,9 @@ class MitMBoard:
         """
         if message.messageType_byte in [ResponseType.NOTIFY_PEV_SIM_CHANGE,
                                          ResponseType.NOTIFY_EVSE_SIM_CHANGE]:
+            if self.pass_through_enabled:
+                # send message to other side
+                pass  # Extension point: implement pass-through logic
             await self._handle_notification(message)
         else:
             await self.response_queue.put(message)
