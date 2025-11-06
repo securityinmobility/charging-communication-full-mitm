@@ -51,12 +51,17 @@ class MitMBoard:
             logging.error(f"Cannot communicate with Arduino: {e}")
             raise
 
-    def send_message(self, message: Message):
+    async def send_message(self, message: Message, verbose: bool = False, message_label: str = "message") -> int:
         """
         Send a message to the Arduino.
         
         Args:
             message: Message instance to send
+
+            verbose: If True, log the response checking
+            message_label: Label for logging purposes
+        Returns:
+            status code of the send operation (0: success, 1: error)
         """
         if self.writer:
             try:
@@ -69,6 +74,25 @@ class MitMBoard:
                 logger.error(f"Unexpected error: {e}")
         else:
             logger.error("Serial writer is not initialized.")
+
+        response = await self.wait_for_response(timeout=1)
+        status = MessageLogic.check_response(message, response)
+        if verbose:
+            if status == 0:
+                logger.info(f"'{message_label}' acknowledged (ACK).")
+            elif status == 1:
+                logger.info(f"'{message_label}' not acknowledged (NACK).")
+            elif status == 2:
+                logger.info (f"'{message_label}' received no response.")
+            elif status == 3:
+                logger.info(f"'{message_label}' received unexpected response.")
+        else:
+            logger.debug(f"'{message_label}' send status: {status}")
+
+        if status == 0:
+            return 0
+        else:
+            return 1
 
     async def read_message(self):
         """Continuously read and process messages from the Arduino."""
@@ -120,9 +144,7 @@ class MitMBoard:
         """
         if message.messageType_byte in [ResponseType.NOTIFY_PEV_SIM_CHANGE,
                                          ResponseType.NOTIFY_EVSE_SIM_CHANGE]:
-            if self.pass_through_enabled:
-                # send message to other side
-                pass  # Extension point: implement pass-through logic
+
             await self._handle_notification(message)
         else:
             await self.response_queue.put(message)
@@ -130,10 +152,19 @@ class MitMBoard:
     async def _handle_notification(self, message: Message):
         """Handle notification messages."""
         logger.info(f"Received notification: {message.messageType}")
-        await self.notification_queue.put(message)
 
-        # Extension point: add setting of the information on the board
-        # Extension point: add functionality to automatically "pass through" signals
+        if message.messageType_byte == ResponseType.NOTIFY_PEV_SIM_CHANGE:
+            self.PEV_SIM_CP_state = ChargingState(message.decision_byte)
+            if self.pass_through_enabled:
+                forward_message = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=message.decision_byte)
+                await self.send_message(forward_message)
+        elif message.messageType_byte == ResponseType.NOTIFY_EVSE_SIM_CHANGE:
+            self.EVSE_SIM_CP_state = message.decision_byte
+            if self.pass_through_enabled:
+                forward_message = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=message.decision_byte)
+                await self.send_message(forward_message)
+        
+        await self.notification_queue.put(message)
 
     async def _handle_response(self, message: Message):
         """Handle response messages."""

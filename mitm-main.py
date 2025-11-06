@@ -32,49 +32,26 @@ async def test_messages(board: MitMBoard):
     if error_msg is None: logging.error("Failed to create error_msg")
     
     # Send the test messages and check for responses
-    board.send_message(message1)
-    response = await board.wait_for_response(timeout=1)
-    if response is None: logging.error("No response received for message1")
-    else:
-        if response.messageType_byte != MessageLogic.message_types[message1.messageType][1]: logging.error("Unexpected response received")
-        else: logging.info("Received expected ACK for message1")
+    status = await board.send_message(message1, verbose=True, message_label="message1")
+    if status == 1: logging.error("Error sending message1")
 
-    board.send_message(message1) # Send again
-    response = await board.wait_for_response(timeout=1)
-    if response is None: logging.error("No response received for message1 - 2nd time")
-    else:
-        if response.messageType_byte != MessageLogic.message_types[message1.messageType][1]: logging.error("Unexpected response received - 2nd time")
-        else: logging.info("Received expected ACK for message1 - 2nd time")
+    status = await board.send_message(message1, verbose=True, message_label="message1 - 2nd time")
+    if status == 1: logging.error("Error sending message1 - 2nd time")
 
-    board.send_message(message2)
-    response = await board.wait_for_response(timeout=1)
-    if response is None: logging.error("No response received for message2")
-    else:
-        if response.messageType_byte != MessageLogic.message_types[message2.messageType][1]: logging.error("Unexpected response received")
-        else: logging.info("Received expected ACK for message2")
+    status = await board.send_message(message2, verbose=True, message_label="message2")
+    if status == 1: logging.error("Error sending message2")
 
-    board.send_message(message3)
-    response = await board.wait_for_response(timeout=1)
-    if response is None: logging.error("No response received for message3")
-    else:
-        if response.messageType_byte != MessageLogic.message_types[message3.messageType][1]: logging.error("Unexpected response received")
-        else: logging.info("Received expected ACK for message3")
-    
-    board.send_message(message4)
-    response = await board.wait_for_response(timeout=1)
-    if response is None: logging.error("No response received for message4")
-    else:
-        if response.messageType_byte != MessageLogic.message_types[message4.messageType][1]: logging.error("Unexpected response received")
-        else: logging.info("Received expected ACK for message4")
-    
-    board.send_message(error_msg)
-    response = await board.wait_for_response(timeout=1)
-    if response is None: logging.error("No response received for error_msg")
+    status = await board.send_message(message3, verbose=True, message_label="message3")
+    if status == 1: logging.error("Error sending message3")
 
-    board.send_message(error_msg)
-    response = await board.wait_for_response(timeout=3)
-    if response is None: logging.error("No response received for error_msg")
+    status = await board.send_message(message4, verbose=True, message_label="message4")
+    if status == 1: logging.error("Error sending message4")
 
+    status = await board.send_message(error_msg, verbose=True, message_label="error_msg")
+    if status == 1: logging.error("Error sending error_msg")
+
+    status = await board.send_message(error_msg, verbose=True, message_label="error_msg - 2nd time")
+    if status == 1: logging.error("Error sending error_msg - 2nd time")
 
 async def main():
     logger = logging.getLogger(__name__)
@@ -85,11 +62,11 @@ async def main():
     try:
         # Connect to board
         await board.connect()
-        
+        board.set_pass_through(True)
         await test_messages(board)
 
         notification = await board.wait_for_notification(1)
-        logger.info(f"Received notification: {notification.messageType}")
+        if notification: logger.info(f"Received notification: {notification.messageType}")
         notification = await board.wait_for_notification(1)
         logger.info(f"Received notification: {notification.messageType}")
 
@@ -98,7 +75,7 @@ async def main():
 
 if __name__ == "__main__":
     log_file = 'mitm.log'
-    setup_logging(logging.INFO, log_file=log_file)
+    setup_logging(logging.DEBUG, log_file=log_file)
     logger = logging.getLogger(__name__)
 
     try:

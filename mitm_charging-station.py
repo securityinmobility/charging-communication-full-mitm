@@ -22,16 +22,13 @@ class MitMChargingStation(ChargingStation):
             raise ValueError("Duty cycle must be between 0 and 100")
 
         message = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=dutycycle)
-        self.MitMBoard.send_message(message)
+        status = asyncio.run(self.MitMBoard.send_message(message))
         
-        result = asyncio.run(self.MitMBoard.wait_for_response(0.5))
-        if result.messageType_byte == message.ACK:
+        if status == 0:
             self.MitMBoard.EVSE_SIM_CP_state = result.dutycycle
             logger.debug(f"Set PWM duty cycle to {dutycycle}%")
-        elif result is None:
-            logger.error("No response received")
-        elif result.messageType_byte == message.NACK:
-            logger.error("Received NACK for setting PWM duty cycle")
+        else: 
+            logger.error("Error setting PWM duty cycle")
 
     def get_pwm_duty_cycle(self) -> float:
         return self.MitMBoard.EVSE_SIM_CP_state

@@ -115,8 +115,24 @@ class MessageLogic:
         return None
     
     @staticmethod
-    def check_response(data: bytes) -> bool:
-        """Check if the received data is an ACK or NACK for this message."""
-        if len(data) < 3:
-            return False
-        return (data[1] == Message.ACK or data[1] == Message.NACK)
+    def check_response(message: Message, response: Message) -> int:
+        """
+        Check if the received data is an ACK
+        Args:
+            message: The original message sent
+            response: The received response message
+        Returns:
+            0 if ACK, 1 if NACK, 2 if no response, 3 if unexpected response
+        """
+        if response is None:
+            logger.debug("No response received")
+            return 2
+        elif response.messageType_byte == MessageLogic.message_types[message.messageType][1]:
+            logger.debug("ACK received")
+            return 0
+        elif response.messageType_byte == MessageLogic.message_types[message.messageType][2]:
+            logger.debug("NACK received")
+            return 1
+        else:
+            logger.debug("Unexpected response received")
+            return 3
