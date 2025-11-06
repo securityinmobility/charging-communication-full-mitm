@@ -96,7 +96,7 @@ class MitMBoard:
 
                     try:
                         message = MessageLogic.from_bytes(potential_message)
-                        logger.debug(f"Parsed message: {type(message)}")
+                        logger.debug(f"Parsed message: {message.messageType}")
                         await self._route_message(message)
                         message_buffer = message_buffer[3:]  # Remove processed bytes
                     except ValueError:
@@ -129,7 +129,7 @@ class MitMBoard:
 
     async def _handle_notification(self, message: Message):
         """Handle notification messages."""
-        logger.info(f"Received notification: {message.__class__.__name__}")
+        logger.info(f"Received notification: {message.messageType}")
         await self.notification_queue.put(message)
 
         # Extension point: add setting of the information on the board
@@ -137,7 +137,7 @@ class MitMBoard:
 
     async def _handle_response(self, message: Message):
         """Handle response messages."""
-        logger.info(f"Received response: {message.to_bytes().hex()}")
+        logger.info(f"Received response: {MessageLogic.to_bytes(message).hex()}")
         await self.response_queue.put(message)
 
     async def wait_for_response(self, timeout: float = 2.0) -> Optional[Message]:
