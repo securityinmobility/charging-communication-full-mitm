@@ -29,7 +29,8 @@ class MitMBoard:
         self.PEV_SIM_PP_state = PP_State_PEVsim.NO_CABLE_CONNECTED
 
         # Queues for different message types
-        self.response_queue = asyncio.Queue()
+        self.responses = [] # list for the responses
+        self.response_queue = asyncio.LifoQueue()
         self.notification_queue = asyncio.Queue()
 
     def set_pass_through(self, enabled: bool):
@@ -51,7 +52,7 @@ class MitMBoard:
             logging.error(f"Cannot communicate with Arduino: {e}")
             raise
 
-    async def send_message(self, message: Message, verbose: bool = False, message_label: str = "message") -> int:
+    async def send_message(self, message: Message, verbose: bool = False, wait_response=0.1, message_label: str = "message") -> int:
         """
         Send a message to the Arduino.
         
@@ -75,7 +76,7 @@ class MitMBoard:
         else:
             logger.error("Serial writer is not initialized.")
 
-        response = await self.wait_for_response(timeout=1)
+        response = await self.get_response(message=message, timeout=wait_response)
         status = MessageLogic.check_response(message, response)
         if verbose:
             if status == 0:
@@ -171,24 +172,44 @@ class MitMBoard:
         logger.info(f"Received response: {MessageLogic.to_bytes(message).hex()}")
         await self.response_queue.put(message)
 
-    async def wait_for_response(self, timeout: float = 2.0) -> Optional[Message]:
-        """
-        Wait for a response message with timeout.
-        
-        Args:
-            timeout: Maximum time to wait in seconds
+async def get_response(self, message: Message, timeout: float = 2.0) -> Optional[Message]:
+    ACK = messageLogic.message_types[message.messageType](1) 
+    NACK = messageLogic.message_types[message.messageType](2)
+    
+    # First check existing responses in the list
+    response_msg = next((msg for msg in self.response_list 
+                        if (msg.messageType_byte == ACK or msg.messageType_byte == NACK) 
+                        and msg.decision_byte == message.decision_byte), None)
+    if response_msg:
+        self.response_msg.remove(response_msg)
+        return response_msg
+    
+    # Wait time for new responses from queue
+    end_time = asyncio.get_event_loop().time() + timeout
+    
+    try:
+        while True:
+            remaining_time = end_time - asyncio.get_event_loop().time()
+            if remaining_time <= 0:
+                raise asyncio.TimeoutError()
             
-        Returns:
-            Message or None if timeout
-        """
-        try:
-            return await asyncio.wait_for(
+            response_msg = await asyncio.wait_for(
                 self.response_queue.get(), 
-                timeout=timeout
+                timeout=remaining_time
             )
-        except asyncio.TimeoutError:
-            logger.warning(f"Response timeout after {timeout} seconds")
-            return None
+
+            # Check if this is the matching message 
+            if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
+                and response_msg.decision_byte == message.decision_byte):
+                
+                self.response_msg.remove(response_msg)
+                return response_msg
+            else:
+                self.response_list.append(response_msg)
+                # Continue waiting for more messages
+                
+    except asyncio.TimeoutError:
+        return None        
 
     async def wait_for_notification(self, timeout: float = None) -> Optional[Message]:
         """
