@@ -5,17 +5,14 @@ import serial
 import serial_asyncio
 from typing import Optional, Dict, Callable, Coroutine, Any
 from messages import *
+from base_classes import CommunicationInterface
 
 # get logger for this module
 logger = logging.getLogger(__name__)
 
 class MitMBoard:
-    def __init__(self, port="/dev/ttyUSB0", baudrate=9600):
-        self.port = port
-        self.baudrate = baudrate
-        self.reader = None
-        self.writer = None
-
+    def __init__(self, usb_interface:CommunicationInterface):
+        self.usb = usb_interface
         self.pass_through_enabled = False
 
         self.EVSE_CP_state = 0 # PWM duty cycle in %
@@ -35,23 +32,12 @@ class MitMBoard:
 
     def set_pass_through(self, enabled: bool):
         self.pass_through_enabled = enabled
-
+    
     async def connect(self):
-        """Establish serial connection to the Arduino board."""
-        try:
-            self.reader, self.writer = await serial_asyncio.open_serial_connection(
-                url=self.port, baudrate=self.baudrate
-            )
-            logger.info(f"Successfully connected to {self.port}")
-            time.sleep(0.2)  # Wait for Arduino
-
-            # Start the read task
-            asyncio.create_task(self.read_message())
-            
-        except serial.SerialException as e:
-            logging.error(f"Cannot communicate with Arduino: {e}")
-            raise
-
+        await self.usb.connect()
+        # Start the read task
+        asyncio.create_task(self.read_message())
+    
     async def send_message(self, message: Message, verbose: bool = False, wait_response=0.1, message_label: str = "message") -> int:
         """
         Send a message to the Arduino.
@@ -64,19 +50,15 @@ class MitMBoard:
         Returns:
             status code of the send operation (0: success, 1: error)
         """
-        if self.writer:
-            try:
-                data = MessageLogic.to_bytes(message)
-                self.writer.write(data)
-                logger.debug(f"Sent message: {data.hex()}")
-            except serial.SerialException as e:
-                logger.error(f"Cannot communicate with Arduino: {e}")
-            except Exception as e:
-                logger.error(f"Unexpected error: {e}")
-        else:
-            logger.error("Serial writer is not initialized.")
+        
+        data = MessageLogic.to_bytes(message)
+        self.usb.write(data)
+        logging.debug("after write")
+
 
         response = await self.get_response(message=message, timeout=wait_response)
+        logging.debug("after get response")
+        
         status = MessageLogic.check_response(message, response)
         if verbose:
             if status == 0:
@@ -97,7 +79,7 @@ class MitMBoard:
 
     async def read_message(self):
         """Continuously read and process messages from the Arduino."""
-        if not self.reader:
+        if not self.usb.is_initialized():
             logger.error("Serial reader is not initialized.")
             return
 
@@ -106,7 +88,7 @@ class MitMBoard:
         while True:
             try:
                 # Read available bytes
-                data = await self.reader.read(99)  # Read up to 99 bytes
+                data = await self.usb.read(99)  # Read up to 99 bytes
                 if not data:
                     continue
                 
@@ -172,44 +154,49 @@ class MitMBoard:
         logger.info(f"Received response: {MessageLogic.to_bytes(message).hex()}")
         await self.response_queue.put(message)
 
-async def get_response(self, message: Message, timeout: float = 2.0) -> Optional[Message]:
-    ACK = messageLogic.message_types[message.messageType](1) 
-    NACK = messageLogic.message_types[message.messageType](2)
-    
-    # First check existing responses in the list
-    response_msg = next((msg for msg in self.response_list 
-                        if (msg.messageType_byte == ACK or msg.messageType_byte == NACK) 
-                        and msg.decision_byte == message.decision_byte), None)
-    if response_msg:
-        self.response_msg.remove(response_msg)
-        return response_msg
-    
-    # Wait time for new responses from queue
-    end_time = asyncio.get_event_loop().time() + timeout
-    
-    try:
-        while True:
-            remaining_time = end_time - asyncio.get_event_loop().time()
-            if remaining_time <= 0:
-                raise asyncio.TimeoutError()
-            
-            response_msg = await asyncio.wait_for(
-                self.response_queue.get(), 
-                timeout=remaining_time
-            )
+    async def get_response(self, message: Message, timeout: float = 2.0) -> Optional[Message]:
+        ACK = MessageLogic.message_types[message.messageType][1] 
+        NACK = MessageLogic.message_types[message.messageType][2]
+        
+        # First check existing responses in the list
+        response_msg = next((msg for msg in self.responses 
+                            if (msg.messageType_byte == ACK or msg.messageType_byte == NACK) 
+                            and msg.decision_byte == message.decision_byte), None)
+        if response_msg:
+            self.response_msg.remove(response_msg)
+            return response_msg
+        
+        # Wait time for new responses from queue
+        end_time = asyncio.get_event_loop().time() + timeout
+        logging.debug("before while")
+        try:
+            while True:
 
-            # Check if this is the matching message 
-            if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
-                and response_msg.decision_byte == message.decision_byte):
+                remaining_time = end_time - asyncio.get_event_loop().time()
+                logging.debug(asyncio.get_event_loop().time())
+                logging.debug(remaining_time)
+                if remaining_time <= 0:
+                    raise asyncio.TimeoutError()
                 
-                self.response_msg.remove(response_msg)
-                return response_msg
-            else:
-                self.response_list.append(response_msg)
-                # Continue waiting for more messages
-                
-    except asyncio.TimeoutError:
-        return None        
+                response_msg = await asyncio.wait_for(
+                    self.response_queue.get(), 
+                    timeout=remaining_time
+                )
+                logging.debug("after wait for response")
+
+                # Check if this is the matching message 
+                if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
+                    and response_msg.decision_byte == message.decision_byte):
+                    
+                    self.response_msg.remove(response_msg)
+                    return response_msg
+                else:
+                    logging.debug("in while else")
+                    self.response_list.append(response_msg)
+                    # Continue waiting for more messages
+                    
+        except asyncio.TimeoutError:
+            return None        
 
     async def wait_for_notification(self, timeout: float = None) -> Optional[Message]:
         """
@@ -232,6 +219,6 @@ async def get_response(self, message: Message, timeout: float = 2.0) -> Optional
         else:
             return await self.notification_queue.get()
 
-    def close(self):
-        if self.writer:
-            self.writer.close()
+    async def close(self):
+        self.usb.close()
+

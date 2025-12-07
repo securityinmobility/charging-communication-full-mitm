@@ -3,6 +3,8 @@ import asyncio
 import os
 import logging
 
+from mitm_usb_interface import UsbInterface 
+from mocks.mock_usb import MockUsbInterface 
 from mitm_board import MitMBoard
 from messages import Message, MessageLogic, MessageType, ResponseType
 
@@ -30,7 +32,7 @@ async def test_messages(board: MitMBoard):
     if message4 is None: logging.error("Failed to create message4")
     error_msg = Message(messageType="ERROR", messageType_byte=MessageType.ERROR, decision_byte=None)
     if error_msg is None: logging.error("Failed to create error_msg")
-    
+
     # Send the test messages and check for responses
     status = await board.send_message(message1, verbose=True, message_label="message1")
     if status == 1: logging.error("Error sending message1")
@@ -56,8 +58,10 @@ async def test_messages(board: MitMBoard):
 async def main():
     logger = logging.getLogger(__name__)
     logger.info("Starting MitM program")
-
-    board = MitMBoard(port="/dev/ttyUSB0")
+    
+    #usb = UsbInterface(port="/dev/ttyUSB0", baudrate=9600)
+    usb = MockUsbInterface(port="/dev/ttyUSB0", baudrate=9600)
+    board = MitMBoard(usb_interface=usb)
     
     try:
         # Connect to board
@@ -66,9 +70,16 @@ async def main():
         await test_messages(board)
 
         notification = await board.wait_for_notification(1)
-        if notification: logger.info(f"Received notification: {notification.messageType}")
+        if notification: 
+            logger.info(f"Received notification: {notification.messageType}")
+        else:
+            logger.info(f"No notification received")
+        
         notification = await board.wait_for_notification(1)
-        logger.info(f"Received notification: {notification.messageType}")
+        if notification: 
+            logger.info(f"Received notification: {notification.messageType}")
+        else:
+            logger.info(f"No notification received")
 
     finally:
         board.close()
