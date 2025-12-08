@@ -53,11 +53,8 @@ class MitMBoard:
         
         data = MessageLogic.to_bytes(message)
         self.usb.write(data)
-        logging.debug("after write")
-
 
         response = await self.get_response(message=message, timeout=wait_response)
-        logging.debug("after get response")
         
         status = MessageLogic.check_response(message, response)
         if verbose:
@@ -163,40 +160,47 @@ class MitMBoard:
                             if (msg.messageType_byte == ACK or msg.messageType_byte == NACK) 
                             and msg.decision_byte == message.decision_byte), None)
         if response_msg:
-            self.response_msg.remove(response_msg)
+            self.responses.remove(response_msg)
             return response_msg
         
         # Wait time for new responses from queue
-        end_time = asyncio.get_event_loop().time() + timeout
-        logging.debug("before while")
+        start_time = asyncio.get_event_loop().time()
+        end_time = start_time + timeout
+        
+        #logging.debug(f"Starting wait at {start_time}, will timeout at {end_time}, timeout={timeout}")
+        
         try:
             while True:
 
-                remaining_time = end_time - asyncio.get_event_loop().time()
-                logging.debug(asyncio.get_event_loop().time())
-                logging.debug(remaining_time)
+                current_time = asyncio.get_event_loop().time()
+                remaining_time = end_time - current_time
+
                 if remaining_time <= 0:
-                    raise asyncio.TimeoutError()
+                    logging.debug("Timeout check:remaining_time <= 0, returning None")
+                    return None
                 
+                #logging.debug(f"About to call wait_for with timeout={remaining_time}")
+            
                 response_msg = await asyncio.wait_for(
                     self.response_queue.get(), 
                     timeout=remaining_time
                 )
-                logging.debug("after wait for response")
-
+                
                 # Check if this is the matching message 
                 if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
                     and response_msg.decision_byte == message.decision_byte):
-                    
-                    self.response_msg.remove(response_msg)
+                    logging.debug("Found matching response") 
                     return response_msg
                 else:
-                    logging.debug("in while else")
-                    self.response_list.append(response_msg)
+                    self.responses.append(response_msg)
                     # Continue waiting for more messages
                     
         except asyncio.TimeoutError:
+            logging.debug("wait_for timed out")
             return None        
+        except Exception as e:
+            logging.error(f"Unexpected exeption: {type(e).__name__}: {e}")
+            raise
 
     async def wait_for_notification(self, timeout: float = None) -> Optional[Message]:
         """
@@ -219,6 +223,6 @@ class MitMBoard:
         else:
             return await self.notification_queue.get()
 
-    async def close(self):
+    def close(self):
         self.usb.close()
 

@@ -23,7 +23,8 @@ async def test_messages(board: MitMBoard):
     """Test message creation and responses."""
     # Create a test message
     message1 = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=0x20)
-    if message1 is None: logging.error("Failed to create message1")
+    if message1 is None: logging.error("Failed to create message1") 
+    logging.debug(message1)
     message2 = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=0x00)
     if message2 is None: logging.error("Failed to create message2")
     message3 = Message(messageType="EVSE_SIM_PP", messageType_byte=MessageType.EVSE_SIM_PP, decision_byte=0x00)
@@ -68,7 +69,7 @@ async def main():
         await board.connect()
         board.set_pass_through(True)
         await test_messages(board)
-
+        
         notification = await board.wait_for_notification(1)
         if notification: 
             logger.info(f"Received notification: {notification.messageType}")
@@ -86,7 +87,7 @@ async def main():
 
 if __name__ == "__main__":
     log_file = 'mitm.log'
-    setup_logging(logging.DEBUG, log_file=log_file)
+    setup_logging(logging.INFO, log_file=log_file)
     logger = logging.getLogger(__name__)
 
     try:

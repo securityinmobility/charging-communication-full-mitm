@@ -15,7 +15,7 @@ class MockUsbInterface(CommunicationInterface):
         
         self.reader = None
         self.writer = None
-    
+        self.a_test_flag = True
         self.output_buffer = bytearray()
 
     async def connect(self):
@@ -25,16 +25,26 @@ class MockUsbInterface(CommunicationInterface):
 
     def write(self, data):
         time.sleep(0.01)
-        if isinstance(data, bytearray) and len(data) == 3:
-            message_type = MessageLogic.get_message_type(data[1])
+        if isinstance(data, bytes) and len(data) == 3:
+            message_type = MessageLogic.get_message_type(data[0])
             if data[2] == 0xFF or message_type != None:
-                self.output_buffer.extend([MessageLogic.message_types[message_type][1], data[1], 0xFF]) # send ACK
+                if self.a_test_flag:    # simulate an error on the first message
+                    self.a_test_flag = False
+                    self.output_buffer.extend([0xD1, 0x00, 0xFF])
+                    self.output_buffer.extend([0xD2, 0x00, 0xFF])
+                elif message_type=="ERROR":
+                    logging.debug("Error Message written")
+                    # TODO simulate Error behaviour
+                else:
+                    logging.debug(f"message_type: {message_type}, data: {data.hex()}")
+                    self.output_buffer.extend([MessageLogic.message_types[message_type][1], data[1], 0xFF]) # send ACK
             else:
-                logger.error(f"Wrong message sent: {data}")
+                logger.error(f"Wrong message sent: {data.hex()}")
         else:
-            logger.error(f"Wrong message sent: {data}")
+            logger.error(f"Wrong message sent : {data.hex()}")
 
     async def read(self, size):
+        await asyncio.sleep(0.01)
         data = self.output_buffer[0:size]
         self.output_buffer = self.output_buffer[size:]
         return data   
