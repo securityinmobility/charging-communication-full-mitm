@@ -125,7 +125,7 @@ class MitMBoard:
         if message.messageType_byte in [ResponseType.NOTIFY_PEV_SIM_CHANGE,
                                          ResponseType.NOTIFY_EVSE_SIM_CHANGE]:
 
-            await self._handle_notification(message)
+            asyncio.create_task(self._handle_notification(message))
         else:
             await self.response_queue.put(message)
 

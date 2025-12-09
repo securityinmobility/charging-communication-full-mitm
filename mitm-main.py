@@ -38,9 +38,6 @@ async def test_messages(board: MitMBoard):
     status = await board.send_message(message1, verbose=True, message_label="message1")
     if status == 1: logging.error("Error sending message1")
 
-    #status = await board.send_message(message1, verbose=True, message_label="message1 - 2nd time")
-    #if status == 1: logging.error("Error sending message1 - 2nd time")
-
     status = await board.send_message(message2, verbose=True, message_label="message2")
     if status == 1: logging.error("Error sending message2")
 
