@@ -38,8 +38,8 @@ async def test_messages(board: MitMBoard):
     status = await board.send_message(message1, verbose=True, message_label="message1")
     if status == 1: logging.error("Error sending message1")
 
-    status = await board.send_message(message1, verbose=True, message_label="message1 - 2nd time")
-    if status == 1: logging.error("Error sending message1 - 2nd time")
+    #status = await board.send_message(message1, verbose=True, message_label="message1 - 2nd time")
+    #if status == 1: logging.error("Error sending message1 - 2nd time")
 
     status = await board.send_message(message2, verbose=True, message_label="message2")
     if status == 1: logging.error("Error sending message2")
@@ -60,8 +60,13 @@ async def main():
     logger = logging.getLogger(__name__)
     logger.info("Starting MitM program")
     
-    #usb = UsbInterface(port="/dev/ttyUSB0", baudrate=9600)
-    usb = MockUsbInterface(port="/dev/ttyUSB0", baudrate=9600)
+    usb_impl = os.environ.get("USB", "mock")
+    
+    if usb_impl == "mock":
+        usb = MockUsbInterface(port="/dev/ttyUSB0", baudrate=9600)
+    else:
+        usb = UsbInterface(port=usb_impl, baudrate=9600)
+
     board = MitMBoard(usb_interface=usb)
     
     try:
@@ -87,7 +92,10 @@ async def main():
 
 if __name__ == "__main__":
     log_file = 'mitm.log'
-    setup_logging(logging.INFO, log_file=log_file)
+    log_level = os.environ.get("LOG_LEVEL", "INFO")
+    numeric_level = getattr(logging, log_level.upper(), logging.INFO)
+    print(numeric_level)
+    setup_logging(numeric_level, log_file=log_file)
     logger = logging.getLogger(__name__)
 
     try:

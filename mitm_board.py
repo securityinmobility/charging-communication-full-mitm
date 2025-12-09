@@ -97,7 +97,7 @@ class MitMBoard:
                     # Extract potential message
                     potential_message = bytes(message_buffer[:3])
                     logger.debug(f"Received potential message: {potential_message.hex()}")
-
+                    logger
                     try:
                         message = MessageLogic.from_bytes(potential_message)
                         logger.debug(f"Parsed message: {message.messageType}")
@@ -171,7 +171,6 @@ class MitMBoard:
         
         try:
             while True:
-
                 current_time = asyncio.get_event_loop().time()
                 remaining_time = end_time - current_time
 

@@ -28,15 +28,16 @@ class MockUsbInterface(CommunicationInterface):
         if isinstance(data, bytes) and len(data) == 3:
             message_type = MessageLogic.get_message_type(data[0])
             if data[2] == 0xFF or message_type != None:
+                logger.debug(f"Message sent: {data.hex()}")
                 if self.a_test_flag:    # simulate an error on the first message
                     self.a_test_flag = False
                     self.output_buffer.extend([0xD1, 0x00, 0xFF])
                     self.output_buffer.extend([0xD2, 0x00, 0xFF])
                 elif message_type=="ERROR":
-                    logging.debug("Error Message written")
+                    logger.debug("Error Message written")
                     # TODO simulate Error behaviour
                 else:
-                    logging.debug(f"message_type: {message_type}, data: {data.hex()}")
+                    logger.debug(f"message_type: {message_type}, data: {data.hex()}")
                     self.output_buffer.extend([MessageLogic.message_types[message_type][1], data[1], 0xFF]) # send ACK
             else:
                 logger.error(f"Wrong message sent: {data.hex()}")
