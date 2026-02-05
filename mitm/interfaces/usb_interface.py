@@ -1,12 +1,12 @@
 import logging
 import serial_asyncio
 import asyncio
-import time
-from mitm_board import CommunicationInterface
-
+from mitm.interfaces.abstract_interface import CommunicationInterface
+from mitm.messages import MessageLogic
 
 # get logger for this module
 logger = logging.getLogger(__name__)
+com_logger = logging.getLogger("communication")
 
 class UsbInterface(CommunicationInterface):
     def __init__(self, port="/dev/ttyUSB0", baudrate=9600):
@@ -23,22 +23,25 @@ class UsbInterface(CommunicationInterface):
                 url=self.port, baudrate=self.baudrate
             )
             logger.info(f"Successfully connected to {self.port}")
-            time.sleep(0.2)  # Wait for Arduino
+            await asyncio.sleep(0.2)  # Wait for Arduino
+            com_logger.info("UsbInterface initialized")
 
-        except serial.SerialException as e:
+        except Exception as e:
             logging.error(f"Cannot communicate with Arduino: {e}")
-            raise
+            raise Exception(f"Connection Issue. Use Port: {self.port}")
 
-    def write(self, data):
+    async def write(self, data):
         if self.writer:
             try:
                 self.writer.write(data)
+                await self.writer.drain()
+                com_logger.info(f"Sent: {data.hex()} - {MessageLogic.get_message_type(data[0])}")
             except serial.SerialException as e:
                 logger.error(f"Cannot communicate with Arduino: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error: {e}")
         else:
-            logger.error("serial writer is not initialized.")
+            logger.error("Serial writer is not initialized.")
     
     async def read(self, size):
         if not self.reader:
@@ -47,12 +50,10 @@ class UsbInterface(CommunicationInterface):
 
         try:
             data = await self.reader.read(size)
+            com_logger.info(f"Recieved: {data.hex()}")
             return data
-        except serial.SerialException as e:
-            logger.error(f"Cannot communicate with Arduino: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Unexpected error in read loop: {e}")
+            logger.error(f"Unexpected error in the interface read function: {e}")
             return None
 
     def is_initialized(self):
@@ -64,3 +65,4 @@ class UsbInterface(CommunicationInterface):
     def close(self):
         if self.writer:
             self.writer.close()
+            com_logger.info("UsbInterface closed")

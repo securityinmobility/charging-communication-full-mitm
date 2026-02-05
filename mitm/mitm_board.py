@@ -1,14 +1,14 @@
 import time
 import asyncio
 import logging
-import serial
 import serial_asyncio
 from typing import Optional, Dict, Callable, Coroutine, Any
-from messages import *
-from base_classes import CommunicationInterface
+from mitm.messages import *
+from mitm.interfaces.abstract_interface import CommunicationInterface
 
 # get logger for this module
 logger = logging.getLogger(__name__)
+com_logger = logging.getLogger("communication")
 
 class MitMBoard:
     def __init__(self, usb_interface:CommunicationInterface):
@@ -31,28 +31,41 @@ class MitMBoard:
         self.notification_queue = asyncio.Queue()
 
     def set_pass_through(self, enabled: bool):
+        """
+        Enable/Disable the board to forward the signals between EV and EVSE.
+        
+        Args:
+           enabled (bool): If True, the signals are forwarded between EV and EVSE. 
+        """
         self.pass_through_enabled = enabled
     
     async def connect(self):
-        await self.usb.connect()
-        # Start the read task
-        asyncio.create_task(self.read_message())
+        """Connect to the mitm microcontroller"""
+        try:
+            await self.usb.connect()
+        except:
+            logger.error(f"Cannot connect to the mitm-board.")
+            raise 
+        asyncio.create_task(self._read_message())    # Start the read task
+        
     
     async def send_message(self, message: Message, verbose: bool = False, wait_response=0.1, message_label: str = "message") -> int:
         """
         Send a message to the Arduino.
         
         Args:
-            message: Message instance to send
+            message (Message): Message instance to send
 
-            verbose: If True, log the response checking
-            message_label: Label for logging purposes
+            verbose (bool): If True, log the response checking
+            wait_response (float): Maximum time the function waits for the response in seconds.(None for infinite)
+
+            message_label (str): Label the message for logging purposes
         Returns:
-            status code of the send operation (0: success, 1: error)
+            Status code of the send operation (0: success, 1: error)
         """
         
         data = MessageLogic.to_bytes(message)
-        self.usb.write(data)
+        await self.usb.write(data)
 
         response = await self.get_response(message=message, timeout=wait_response)
         
@@ -74,84 +87,18 @@ class MitMBoard:
         else:
             return 1
 
-    async def read_message(self):
-        """Continuously read and process messages from the Arduino."""
-        if not self.usb.is_initialized():
-            logger.error("Serial reader is not initialized.")
-            return
-
-        message_buffer = bytearray()
-        
-        while True:
-            try:
-                # Read available bytes
-                data = await self.usb.read(99)  # Read up to 99 bytes
-                if not data:
-                    continue
-                
-                message_buffer.extend(data)
-                
-                # Process complete messages (assuming 3-byte messages)
-                # TODO: Add logic for faulty message lengths
-                while len(message_buffer) >= 3:
-                    # Extract potential message
-                    potential_message = bytes(message_buffer[:3])
-                    logger.debug(f"Received potential message: {potential_message.hex()}")
-                    logger
-                    try:
-                        message = MessageLogic.from_bytes(potential_message)
-                        logger.debug(f"Parsed message: {message.messageType}")
-                        await self._route_message(message)
-                        message_buffer = message_buffer[3:]  # Remove processed bytes
-                    except ValueError:
-                        # Invalid message, skip three bytes and try again
-                        logger.warning(f"Invalid message bytes: {potential_message.hex()}")
-                        message_buffer = message_buffer[3:]
-
-            except serial.SerialException as e:
-                logger.error(f"Cannot communicate with Arduino: {e}")
-                break
-            except Exception as e:
-                logger.error(f"Unexpected error in read loop: {e}")
-                break
-
-    async def _route_message(self, message: Message):
-        """
-        Route a message to the appropriate handler.
-        
-        Args:
-            message: The parsed message to route
-        """
-        if message.messageType_byte in [ResponseType.NOTIFY_PEV_SIM_CHANGE,
-                                         ResponseType.NOTIFY_EVSE_SIM_CHANGE]:
-
-            asyncio.create_task(self._handle_notification(message))
-        else:
-            await self.response_queue.put(message)
-
-    async def _handle_notification(self, message: Message):
-        """Handle notification messages."""
-        logger.info(f"Received notification: {message.messageType}")
-
-        if message.messageType_byte == ResponseType.NOTIFY_PEV_SIM_CHANGE:
-            self.PEV_SIM_CP_state = ChargingState(message.decision_byte)
-            if self.pass_through_enabled:
-                forward_message = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=message.decision_byte)
-                await self.send_message(forward_message)
-        elif message.messageType_byte == ResponseType.NOTIFY_EVSE_SIM_CHANGE:
-            self.EVSE_SIM_CP_state = message.decision_byte
-            if self.pass_through_enabled:
-                forward_message = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=message.decision_byte)
-                await self.send_message(forward_message)
-        
-        await self.notification_queue.put(message)
-
-    async def _handle_response(self, message: Message):
-        """Handle response messages."""
-        logger.info(f"Received response: {MessageLogic.to_bytes(message).hex()}")
-        await self.response_queue.put(message)
-
     async def get_response(self, message: Message, timeout: float = 2.0) -> Optional[Message]:
+        """
+        Waits for and retrieves the matching response message of a previously send message.
+
+        Args:
+            message (Message): The message, for which the answer is retrieved.
+            timeout (float): Maximum time the function waits for the response in seconds. (None for infinite)
+
+            
+        Returns: Message object if a fitting response was received, None if it timed out without receiving a matching response.
+        """
+
         ACK = MessageLogic.message_types[message.messageType][1] 
         NACK = MessageLogic.message_types[message.messageType][2]
         
@@ -167,8 +114,6 @@ class MitMBoard:
         start_time = asyncio.get_event_loop().time()
         end_time = start_time + timeout
         
-        #logging.debug(f"Starting wait at {start_time}, will timeout at {end_time}, timeout={timeout}")
-        
         try:
             while True:
                 current_time = asyncio.get_event_loop().time()
@@ -178,8 +123,6 @@ class MitMBoard:
                     logging.debug("Timeout check:remaining_time <= 0, returning None")
                     return None
                 
-                #logging.debug(f"About to call wait_for with timeout={remaining_time}")
-            
                 response_msg = await asyncio.wait_for(
                     self.response_queue.get(), 
                     timeout=remaining_time
@@ -188,7 +131,7 @@ class MitMBoard:
                 # Check if this is the matching message 
                 if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
                     and response_msg.decision_byte == message.decision_byte):
-                    logging.debug("Found matching response") 
+                    logging.debug(f"Found matching response for {message}") 
                     return response_msg
                 else:
                     self.responses.append(response_msg)
@@ -201,12 +144,86 @@ class MitMBoard:
             logging.error(f"Unexpected exeption: {type(e).__name__}: {e}")
             raise
 
+    async def _read_message(self):
+        """Continuously read and process messages from the Arduino."""
+        if not self.usb.is_initialized():
+            logger.error("Serial reader is not initialized.")
+            return
+
+        message_buffer = bytearray()
+        
+        while True:
+            try:
+                # Read available bytes
+                data = await self.usb.read(99)  # Read up to 99 bytes
+                if not data:
+                    continue
+                message_buffer.extend(data)
+                
+                # Process complete messages (assuming 3-byte messages)
+                # TODO: Add logic to handle faulty message lengths
+                while len(message_buffer) >= 3:
+                    # Extract potential message
+                    potential_message = bytes(message_buffer[:3])
+                    #logger.debug(f"Received potential message: {potential_message.hex()}")
+                    try:
+                        message = MessageLogic.from_bytes(potential_message)
+                        #asyncio.create_task(self._route_message(message))
+                        asyncio.create_task(self._route_message(message))
+                        message_buffer = message_buffer[3:]  # Remove processed bytes
+                    except ValueError:
+                        # Invalid message, skip three bytes and try again
+                        logger.warning(f"Received invalid message bytes: {potential_message.hex()}")
+                        message_buffer = message_buffer[3:]
+
+            except Exception as e:
+                logger.error(f"Unexpected error in read loop: {e}")
+                break
+
+    async def _route_message(self, message: Message):
+        """
+        Route a message to the appropriate handler.
+        
+        Args:
+            message (Message): The parsed message to route
+        """
+        if message.messageType_byte in [ResponseType.NOTIFY_PEV_SIM_CHANGE,
+                                         ResponseType.NOTIFY_EVSE_SIM_CHANGE]:
+
+            await self._handle_notification(message)
+        else:
+            #asyncio.create_task(self._handle_response(message))
+            await self.response_queue.put(message)
+
+    async def _handle_notification(self, message: Message):
+        """Handle notification messages."""
+        logger.info(f"Received notification: {message.messageType}")
+
+        if message.messageType_byte == ResponseType.NOTIFY_PEV_SIM_CHANGE:
+            self.PEV_SIM_CP_state = ChargingState(message.decision_byte)
+            if self.pass_through_enabled:
+                forward_message = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=message.decision_byte)
+                await self.send_message(forward_message, wait_response=0)
+        elif message.messageType_byte == ResponseType.NOTIFY_EVSE_SIM_CHANGE:
+            self.EVSE_SIM_CP_state = message.decision_byte
+            if self.pass_through_enabled:
+                forward_message = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=message.decision_byte)
+                await self.send_message(forward_message, wait_response=0)
+        
+        await self.notification_queue.put(message)
+
+    async def _handle_response(self, message: Message):
+        """Handle response messages."""
+        logger.info(f"Received response: {MessageLogic.to_bytes(message).hex()}")
+        await self.response_queue.put(message)
+
+
     async def wait_for_notification(self, timeout: float = None) -> Optional[Message]:
         """
         Wait for a notification message.
         
         Args:
-            timeout: Maximum time to wait (None for infinite)
+            timeout (float): Maximum time to wait (None for infinite)
             
         Returns:
             Message or None if timeout
@@ -223,5 +240,6 @@ class MitMBoard:
             return await self.notification_queue.get()
 
     def close(self):
+        """"Disconnect from the microcontroller"""
         self.usb.close()
 

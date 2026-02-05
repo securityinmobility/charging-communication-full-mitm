@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mitm"
+version = "0.1.0"
+description = "A Man-in-the-Middle project"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Ferdinand Schleeh", email = "ferdinand.schleeh@outlook.de"},
+]
+
+dependencies = [
+  "pyserial",
+  "pyserial-asyncio",
+]
+
+[project.scripts]
+# Run main script by typing 'mitm-start' in the terminal
+mitm-start = "mitm_main:main" 
+
+# Run: pip install .[test]
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-mock",
+    "pytest-cov",
+    "pytest-asyncio"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mitm*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
