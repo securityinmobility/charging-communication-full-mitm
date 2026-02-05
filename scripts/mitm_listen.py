@@ -62,8 +62,9 @@ async def main():
 if __name__ == "__main__":
     log_level = os.environ.get("LOG_LEVEL", "INFO")
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
+    log_file = os.environ.get("LOG_FILE", None)
 
-    setup_logging(numeric_level)
+    setup_logging(numeric_level, log_file)
     logger = logging.getLogger(__name__)
 
     try:
