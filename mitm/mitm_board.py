@@ -169,7 +169,7 @@ class MitMBoard:
                 # Read available bytes
                 data = self.usb.read(3)
                 if not data:
-                    time.sleep(0.005)
+                    #time.sleep(0.005)
                     continue
                 elif len(data) != 3:
                     logger.warning(f"Received invalid message bytes: {data.hex()}")
@@ -208,7 +208,8 @@ class MitMBoard:
         while not self._stop_event.is_set():
             try:
                 message = self.notification_queue.get(timeout=0.5)
-                if self.pass_through_enabled: self.send_message(message, wait_response=0.01)
+                if self.pass_through_enabled: 
+                    if self.send_message(message, wait_response=0.01)
                 logger.info(f"Handle notification {message.messageType}")
                 self.notification_queue.task_done()
             except queue.Empty:
