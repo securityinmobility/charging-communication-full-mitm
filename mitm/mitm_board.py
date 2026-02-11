@@ -209,7 +209,11 @@ class MitMBoard:
             try:
                 message = self.notification_queue.get(timeout=0.5)
                 if self.pass_through_enabled: 
-                    if self.send_message(message, wait_response=0.01)
+                    if message.messageType_byte == ResponseType.NOTIFY_PEV_SIM_CHANGE:
+                        forward_message = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=message.decision_byte)
+                    elif message.messageType_byte == ResponseType.NOTIFY_EVSE_SIM_CHANGE:
+                        forward_message = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=message.decision_byte)
+                    self.send_message(forward_message, wait_response=0.05)
                 logger.info(f"Handle notification {message.messageType}")
                 self.notification_queue.task_done()
             except queue.Empty:

@@ -1,6 +1,6 @@
 # Charging Communication MitM
 
-A Man-in-the-Middle (MitM) tool for EV charging communication based on IEC 61851-1 standard.
+A Man-in-the-Middle (MitM) tool for EV charging communication.
 
 ## Overview
 
@@ -21,7 +21,7 @@ This project enables interception and control of the communication between Elect
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+pip install -e . # -e if in development
 ```
 
 ## Quick Start
@@ -37,24 +37,14 @@ USB=mock python mitm-main.py
 USB=/dev/ttyUSB0 python mitm-main.py
 ```
 
-## Project Structure
+## Environment variables 
 
 ```
-.
-├── base_classes.py          # Abstract base classes
-├── messages.py              # Message protocol definitions
-├── mitm_board.py            # Board communication logic
-├── mitm_charging-station.py # EVSE simulator
-├── mitm_vehicle.py          # EV simulator
-├── mitm_usb_interface.py    # Serial interface
-└── mocks/                   # Mock implementations
+USB         # path to usb port
+LOG_LEVEL   # DEBUG, INFO
+LOG_FILE    # filename is created in logs folder
 ```
 
 ## License
 
 GNU Affero General Public License v3.0 (AGPL-3.0)
-
-## References
-
-- [DIN EN 61851-1:2012](https://en.wikipedia.org/wiki/IEC_61851) - Electric vehicle conductive charging system
-- [EVSim Documentation](https://evsim.gonium.net/)
