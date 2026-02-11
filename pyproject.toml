@@ -14,8 +14,7 @@ authors = [
 ]
 
 dependencies = [
-  "pyserial",
-  "pyserial-asyncio",
+  "pyserial"
 ]
 
 [project.scripts]

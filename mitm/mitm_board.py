@@ -1,7 +1,9 @@
 import time
-import asyncio
 import logging
-import serial_asyncio
+import threading
+import serial
+import queue
+
 from typing import Optional, Dict, Callable, Coroutine, Any
 from mitm.messages import *
 from mitm.interfaces.abstract_interface import CommunicationInterface
@@ -27,8 +29,12 @@ class MitMBoard:
 
         # Queues for different message types
         self.responses = [] # list for the responses
-        self.response_queue = asyncio.LifoQueue()
-        self.notification_queue = asyncio.Queue()
+        self.response_queue = queue.LifoQueue()
+        self.notification_queue = queue.Queue()
+        
+        #self.listener_thread = None
+        self._stop_event = None
+        self.serial_lock = threading.Lock()
 
     def set_pass_through(self, enabled: bool):
         """
@@ -39,17 +45,25 @@ class MitMBoard:
         """
         self.pass_through_enabled = enabled
     
-    async def connect(self):
+    def connect(self):
         """Connect to the mitm microcontroller"""
         try:
-            await self.usb.connect()
+            logger.debug("before connect")
+            self.usb.connect()
         except:
             logger.error(f"Cannot connect to the mitm-board.")
             raise 
-        asyncio.create_task(self._read_message())    # Start the read task
+        self._stop_event = threading.Event()
+
+        self.notification_thread = threading.Thread(target=self.handle_notification, args=(), daemon=True)
+        self.notification_thread.start()
+
+        self.listener_thread = threading.Thread(target=self._listener, args=(), daemon=True)
+        self.listener_thread.start() # Start the read task
         
+        logger.debug("after connect, thread started")
     
-    async def send_message(self, message: Message, verbose: bool = False, wait_response=0.1, message_label: str = "message") -> int:
+    def send_message(self, message: Message, verbose: bool = False, wait_response=0.1, message_label: str = "message") -> int:
         """
         Send a message to the Arduino.
         
@@ -65,9 +79,10 @@ class MitMBoard:
         """
         
         data = MessageLogic.to_bytes(message)
-        await self.usb.write(data)
+        with self.serial_lock:
+            self.usb.write(data)
 
-        response = await self.get_response(message=message, timeout=wait_response)
+        response = self.get_response(message=message, timeout=wait_response)
         
         status = MessageLogic.check_response(message, response)
         if verbose:
@@ -87,7 +102,7 @@ class MitMBoard:
         else:
             return 1
 
-    async def get_response(self, message: Message, timeout: float = 2.0) -> Optional[Message]:
+    def get_response(self, message: Message, timeout: float = 2.0) -> Optional[Message]:
         """
         Waits for and retrieves the matching response message of a previously send message.
 
@@ -111,22 +126,19 @@ class MitMBoard:
             return response_msg
         
         # Wait time for new responses from queue
-        start_time = asyncio.get_event_loop().time()
+        start_time = time.monotonic()
         end_time = start_time + timeout
         
         try:
             while True:
-                current_time = asyncio.get_event_loop().time()
+                current_time = time.monotonic()
                 remaining_time = end_time - current_time
 
                 if remaining_time <= 0:
-                    logging.debug("Timeout check:remaining_time <= 0, returning None")
+                    logging.debug("Timeout reached, returning None")
                     return None
                 
-                response_msg = await asyncio.wait_for(
-                    self.response_queue.get(), 
-                    timeout=remaining_time
-                )
+                response_msg = self.response_queue.get(block=True, timeout=remaining_time) 
                 
                 # Check if this is the matching message 
                 if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
@@ -137,14 +149,14 @@ class MitMBoard:
                     self.responses.append(response_msg)
                     # Continue waiting for more messages
                     
-        except asyncio.TimeoutError:
-            logging.debug("wait_for timed out")
+        except queue.Empty:
+            logging.debug("Empty queue")
             return None        
         except Exception as e:
             logging.error(f"Unexpected exeption: {type(e).__name__}: {e}")
             raise
 
-    async def _read_message(self):
+    def _listener(self):
         """Continuously read and process messages from the Arduino."""
         if not self.usb.is_initialized():
             logger.error("Serial reader is not initialized.")
@@ -152,24 +164,21 @@ class MitMBoard:
 
         message_buffer = bytearray()
         
-        while True:
+        while not self._stop_event.is_set():
             try:
                 # Read available bytes
-                data = await self.usb.read(99)  # Read up to 99 bytes
+                data = self.usb.read(3)
                 if not data:
+                    time.sleep(0.005)
                     continue
-                message_buffer.extend(data)
+                elif len(data) != 3:
+                    logger.warning(f"Received invalid message bytes: {data.hex()}")
+                else:
+                    message_buffer.extend(data)
                 
-                # Process complete messages (assuming 3-byte messages)
-                # TODO: Add logic to handle faulty message lengths
-                while len(message_buffer) >= 3:
-                    # Extract potential message
-                    potential_message = bytes(message_buffer[:3])
-                    #logger.debug(f"Received potential message: {potential_message.hex()}")
                     try:
-                        message = MessageLogic.from_bytes(potential_message)
-                        #asyncio.create_task(self._route_message(message))
-                        asyncio.create_task(self._route_message(message))
+                        message = MessageLogic.from_bytes(data)
+                        self._route_message(message)
                         message_buffer = message_buffer[3:]  # Remove processed bytes
                     except ValueError:
                         # Invalid message, skip three bytes and try again
@@ -180,7 +189,7 @@ class MitMBoard:
                 logger.error(f"Unexpected error in read loop: {e}")
                 break
 
-    async def _route_message(self, message: Message):
+    def _route_message(self, message: Message):
         """
         Route a message to the appropriate handler.
         
@@ -189,36 +198,29 @@ class MitMBoard:
         """
         if message.messageType_byte in [ResponseType.NOTIFY_PEV_SIM_CHANGE,
                                          ResponseType.NOTIFY_EVSE_SIM_CHANGE]:
-
-            await self._handle_notification(message)
+            self.notification_queue.put(message)
         else:
-            #asyncio.create_task(self._handle_response(message))
-            await self.response_queue.put(message)
+            self.response_queue.put(message)
 
-    async def _handle_notification(self, message: Message):
+    def handle_notification(self):
         """Handle notification messages."""
-        logger.info(f"Received notification: {message.messageType}")
 
-        if message.messageType_byte == ResponseType.NOTIFY_PEV_SIM_CHANGE:
-            self.PEV_SIM_CP_state = ChargingState(message.decision_byte)
-            if self.pass_through_enabled:
-                forward_message = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=message.decision_byte)
-                await self.send_message(forward_message, wait_response=0)
-        elif message.messageType_byte == ResponseType.NOTIFY_EVSE_SIM_CHANGE:
-            self.EVSE_SIM_CP_state = message.decision_byte
-            if self.pass_through_enabled:
-                forward_message = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=message.decision_byte)
-                await self.send_message(forward_message, wait_response=0)
-        
-        await self.notification_queue.put(message)
+        while not self._stop_event.is_set():
+            try:
+                message = self.notification_queue.get(timeout=0.5)
+                if self.pass_through_enabled: self.send_message(message, wait_response=0.01)
+                logger.info(f"Handle notification {message.messageType}")
+                self.notification_queue.task_done()
+            except queue.Empty:
+                continue
 
-    async def _handle_response(self, message: Message):
+    def _handle_response(self, message: Message):
         """Handle response messages."""
         logger.info(f"Received response: {MessageLogic.to_bytes(message).hex()}")
-        await self.response_queue.put(message)
+        self.response_queue.put(message)
 
 
-    async def wait_for_notification(self, timeout: float = None) -> Optional[Message]:
+    def wait_for_notification(self, timeout: float = None) -> Optional[Message]:
         """
         Wait for a notification message.
         
@@ -226,20 +228,18 @@ class MitMBoard:
             timeout (float): Maximum time to wait (None for infinite)
             
         Returns:
-            Message or None if timeout
+            Message or None on timeout
         """
-        if timeout:
-            try:
-                return await asyncio.wait_for(
-                    self.notification_queue.get(), 
-                    timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                return None
-        else:
-            return await self.notification_queue.get()
+        try:
+            message = self.notification_queue.get(block=True, timeout=timeout)
+            return message
+        except queue.Empty:
+            return None
 
     def close(self):
         """"Disconnect from the microcontroller"""
+        self._stop_event.set()
+        self.notification_thread.join()
+        self.listener_thread.join()    
         self.usb.close()
 

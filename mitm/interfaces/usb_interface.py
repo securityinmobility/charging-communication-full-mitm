@@ -1,6 +1,7 @@
 import logging
-import serial_asyncio
-import asyncio
+import serial
+import time
+
 from mitm.interfaces.abstract_interface import CommunicationInterface
 from mitm.messages import MessageLogic
 
@@ -13,28 +14,25 @@ class UsbInterface(CommunicationInterface):
         self.port = port
         self.baudrate = baudrate
 
-        self.reader = None
-        self.writer = None
+        self.serial = None
 
-    async def connect(self):
+    def connect(self):
         """Establish serial connection to the Arduino board."""
         try:
-            self.reader, self.writer = await serial_asyncio.open_serial_connection(
-                url=self.port, baudrate=self.baudrate
-            )
+            self.serial = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=1) 
+            self.serial.flush()
             logger.info(f"Successfully connected to {self.port}")
-            await asyncio.sleep(0.2)  # Wait for Arduino
+            time.sleep(0.2)  # Wait for Arduino
             com_logger.info("UsbInterface initialized")
 
         except Exception as e:
             logging.error(f"Cannot communicate with Arduino: {e}")
             raise Exception(f"Connection Issue. Use Port: {self.port}")
 
-    async def write(self, data):
-        if self.writer:
+    def write(self, data):
+        if self.serial.is_open:
             try:
-                self.writer.write(data)
-                await self.writer.drain()
+                self.serial.write(data)
                 com_logger.info(f"Sent: {data.hex()} - {MessageLogic.get_message_type(data[0])}")
             except serial.SerialException as e:
                 logger.error(f"Cannot communicate with Arduino: {e}")
@@ -43,13 +41,12 @@ class UsbInterface(CommunicationInterface):
         else:
             logger.error("Serial writer is not initialized.")
     
-    async def read(self, size):
-        if not self.reader:
+    def read(self, size):
+        if not self.serial.is_open:
             logger.error("Serial reader is not initialized.")
             return None
-
         try:
-            data = await self.reader.read(size)
+            data = self.serial.read(size)
             com_logger.info(f"Recieved: {data.hex()}")
             return data
         except Exception as e:
@@ -57,12 +54,9 @@ class UsbInterface(CommunicationInterface):
             return None
 
     def is_initialized(self):
-        if self.reader is None:
-            return False
-        else:
-            return True
+        return self.serial.is_open
         
     def close(self):
-        if self.writer:
-            self.writer.close()
+        if self.serial.is_open:
+            self.serial.close()
             com_logger.info("UsbInterface closed")

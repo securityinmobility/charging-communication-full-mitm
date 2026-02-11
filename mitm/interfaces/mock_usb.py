@@ -1,13 +1,12 @@
 import logging
-import serial_asyncio
-import asyncio
+import serial
 import time
+
 from mitm.interfaces.abstract_interface import CommunicationInterface
 from mitm.messages import MessageLogic
 
 # get logger for this module
 logger = logging.getLogger(__name__)
-
 com_logger = logging.getLogger("communication")
 
 class MockUsbInterface(CommunicationInterface):
@@ -15,18 +14,17 @@ class MockUsbInterface(CommunicationInterface):
         self.port = port
         self.baudrate = baudrate
         
-        self.reader = None
-        self.writer = None
+        self.serial = None
+
         self.error_flag = error_on_first_message
         self.output_buffer = bytearray()
 
-    async def connect(self):
-        self.reader = "reader" # make the object not none
-        self.writer = "writer" # make the object not none
-        await asyncio.sleep(0.2)
+    def connect(self):
+        self.serial = "serial" # make the object not none
+        time.sleep(0.2)
         com_logger.info("MockUsbInterface initialized")
 
-    async def write(self, data):
+    def write(self, data):
         if isinstance(data, bytes) and len(data) == 3:
             message_type = MessageLogic.get_message_type(data[0])
             if data[2] == 0xFF or message_type != None:
@@ -49,22 +47,21 @@ class MockUsbInterface(CommunicationInterface):
         else:
             logger.error(f"Faulty message: {data.hex()}")
         
-        await asyncio.sleep(0.005) # simulate time to send
+        time.sleep(0.005) # simulate time to send
 
-    async def read(self, size):
-        await asyncio.sleep(0.005)
+    def read(self, size):
+        time.sleep(0.005)
         data = self.output_buffer[0:size]
         self.output_buffer = self.output_buffer[size:]
         if data: com_logger.info(f"Recieved: {data.hex()}")
         return data   
 
     def is_initialized(self):
-        if self.reader is None:
+        if self.serial is None:
             return False
         else:
             return True
 
     def close(self):
-        self.writer = None
-        self.reader = None
+        self.serial = None
         com_logger.info("MockUsbInterface closed")
