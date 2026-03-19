@@ -27,7 +27,6 @@ test = [
     "pytest",
     "pytest-mock",
     "pytest-cov",
-    "pytest-asyncio"
 ]
 
 [tool.setuptools.packages.find]

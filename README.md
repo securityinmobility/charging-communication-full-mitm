@@ -4,14 +4,7 @@ A Man-in-the-Middle (MitM) tool for EV charging communication.
 
 ## Overview
 
-This project enables interception and control of the communication between Electric Vehicles (EVs) and Electric Vehicle Supply Equipment (EVSE) for testing and development purposes.
-
-## Features
-
-- Monitor Control Pilot (CP) and Proximity Pilot (PP) signals
-- Simulate both EV and EVSE behavior
-- Pass-through mode for transparent forwarding
-- Support for all charging states (A, B, C, D, E, F)
+This project enables interception and control of the communication between Electric Vehicles (EVs) and Electric Vehicle Supply Equipment (EVSE) for research purposes.
 
 ## Requirements
 
@@ -42,7 +35,7 @@ USB=/dev/ttyUSB0 python mitm-main.py
 ```
 USB         # path to usb port
 LOG_LEVEL   # DEBUG, INFO
-LOG_FILE    # filename is created in logs folder
+LOG_FILE    # filename of the file, is created in logs folder
 ```
 
 ## License
