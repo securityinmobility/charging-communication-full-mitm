@@ -50,6 +50,8 @@ class MitMBoard:
         try:
             logger.debug("before connect")
             self.usb.connect()
+            if self.usb.read(6) is None:
+                logger.info("Initial Messages couldn't be retrieved")
         except:
             logger.error(f"Cannot connect to the mitm-board.")
             raise 
@@ -65,7 +67,8 @@ class MitMBoard:
     
     def send_message(self, message: Message, verbose: bool = False, wait_response=0.1, message_label: str = "message") -> int:
         """
-        Send a message to the Arduino.
+        Send a message to the microcontroller.
+        Waits for the matching response message and evaluates it, if it is received.
         
         Args:
             message (Message): Message instance to send
@@ -82,8 +85,51 @@ class MitMBoard:
         with self.serial_lock:
             self.usb.write(data)
 
-        response = self.get_response(message=message, timeout=wait_response)
+        # get response message
+        response = None
+        ACK = MessageLogic.message_types[message.messageType][1] 
+        NACK = MessageLogic.message_types[message.messageType][2]
         
+        # First check existing responses in the list
+        response_msg = next((msg for msg in self.responses 
+                            if (msg.messageType_byte == ACK or msg.messageType_byte == NACK) 
+                            and msg.decision_byte == message.decision_byte), None)
+        if response_msg:
+            self.responses.remove(response_msg)
+            response = response_msg
+        else:
+            # Wait time for new responses from queue
+            start_time = time.monotonic()
+            end_time = start_time + wait_response
+            
+            try:
+                while True:
+                    current_time = time.monotonic()
+                    remaining_time = end_time - current_time
+
+                    if remaining_time <= 0:
+                        logging.debug("Timeout reached, no message received")
+                        response = None
+                    
+                    response_msg = self.response_queue.get(block=True, timeout=remaining_time) 
+                    
+                    # Check if this is the matching message 
+                    if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
+                        and response_msg.decision_byte == message.decision_byte):
+                        logging.debug(f"Found matching response for {message}") 
+                        response = response_msg
+                        break
+                    else:
+                        self.responses.append(response_msg)
+                        # Continue waiting for more messages
+                        
+            except queue.Empty:
+                logging.debug("Empty queue")
+                response = None        
+            except Exception as e:
+                logging.error(f"Unexpected exeption: {type(e).__name__}: {e}")
+                raise
+
         status = MessageLogic.check_response(message, response)
         if verbose:
             if status == 0:
@@ -101,60 +147,6 @@ class MitMBoard:
             return 0
         else:
             return 1
-
-    def get_response(self, message: Message, timeout: float = 2.0) -> Optional[Message]:
-        """
-        Waits for and retrieves the matching response message of a previously send message.
-
-        Args:
-            message (Message): The message, for which the answer is retrieved.
-            timeout (float): Maximum time the function waits for the response in seconds. (None for infinite)
-
-            
-        Returns: Message object if a fitting response was received, None if it timed out without receiving a matching response.
-        """
-
-        ACK = MessageLogic.message_types[message.messageType][1] 
-        NACK = MessageLogic.message_types[message.messageType][2]
-        
-        # First check existing responses in the list
-        response_msg = next((msg for msg in self.responses 
-                            if (msg.messageType_byte == ACK or msg.messageType_byte == NACK) 
-                            and msg.decision_byte == message.decision_byte), None)
-        if response_msg:
-            self.responses.remove(response_msg)
-            return response_msg
-        
-        # Wait time for new responses from queue
-        start_time = time.monotonic()
-        end_time = start_time + timeout
-        
-        try:
-            while True:
-                current_time = time.monotonic()
-                remaining_time = end_time - current_time
-
-                if remaining_time <= 0:
-                    logging.debug("Timeout reached, returning None")
-                    return None
-                
-                response_msg = self.response_queue.get(block=True, timeout=remaining_time) 
-                
-                # Check if this is the matching message 
-                if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
-                    and response_msg.decision_byte == message.decision_byte):
-                    logging.debug(f"Found matching response for {message}") 
-                    return response_msg
-                else:
-                    self.responses.append(response_msg)
-                    # Continue waiting for more messages
-                    
-        except queue.Empty:
-            logging.debug("Empty queue")
-            return None        
-        except Exception as e:
-            logging.error(f"Unexpected exeption: {type(e).__name__}: {e}")
-            raise
 
     def _listener(self):
         """Continuously read and process messages from the Arduino."""
