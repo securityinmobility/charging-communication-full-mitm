@@ -24,10 +24,13 @@ pip install -e . # -e if in development
 python test_connection.py
 
 # Run with mock interface (for development)
-USB=mock python mitm-main.py
+USB=mock python mitm_main.py
 
 # Run with real hardware
-USB=/dev/ttyUSB0 python mitm-main.py
+USB=/dev/ttyUSB0 python mitm_main.py
+
+# Board is just monitoring and passing on the messages
+USB=/dev/ttyUSB0 python scripts/mitm_listen.py
 ```
 
 ## Environment variables 

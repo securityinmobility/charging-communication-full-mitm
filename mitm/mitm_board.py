@@ -18,9 +18,7 @@ class MitMBoard:
         self.pass_through_enabled = False
 
         self.EVSE_CP_state = 0 # PWM duty cycle in %
-        self.EVSE_PP_state = None
         self.PEV_CP_state = ChargingState.A
-        self.PEV_PP_state = None
 
         self.EVSE_SIM_CP_state = 0 # PWM duty cycle in %
         self.EVSE_SIM_PP_state = PP_State_EVSEsim.NO_PLUG_CONNECTED
@@ -28,11 +26,10 @@ class MitMBoard:
         self.PEV_SIM_PP_state = PP_State_PEVsim.NO_CABLE_CONNECTED
 
         # Queues for different message types
-        self.responses = [] # list for the responses
-        self.response_queue = queue.LifoQueue()
+        self.unresponded_messages = [] # list for the sent messages without an ACK/NACK response
+        self.response_queue = queue.Queue()
         self.notification_queue = queue.Queue()
         
-        #self.listener_thread = None
         self._stop_event = None
         self.serial_lock = threading.Lock()
 
@@ -85,50 +82,55 @@ class MitMBoard:
         with self.serial_lock:
             self.usb.write(data)
 
-        # get response message
         response = None
-        ACK = MessageLogic.message_types[message.messageType][1] 
-        NACK = MessageLogic.message_types[message.messageType][2]
         
-        # First check existing responses in the list
-        response_msg = next((msg for msg in self.responses 
-                            if (msg.messageType_byte == ACK or msg.messageType_byte == NACK) 
-                            and msg.decision_byte == message.decision_byte), None)
-        if response_msg:
-            self.responses.remove(response_msg)
-            response = response_msg
-        else:
-            # Wait time for new responses from queue
-            start_time = time.monotonic()
-            end_time = start_time + wait_response
-            
-            try:
-                while True:
-                    current_time = time.monotonic()
-                    remaining_time = end_time - current_time
+        # Wait time for new responses from queue
+        start_time = time.monotonic()
+        end_time = start_time + wait_response
+        
+        try:
+            while True:
+                current_time = time.monotonic()
+                remaining_time = end_time - current_time
 
-                    if remaining_time <= 0:
-                        logging.debug("Timeout reached, no message received")
-                        response = None
-                    
-                    response_msg = self.response_queue.get(block=True, timeout=remaining_time) 
-                    
-                    # Check if this is the matching message 
-                    if ((response_msg.messageType_byte == ACK or response_msg.messageType_byte == NACK) 
+                if remaining_time <= 0:
+                    logging.debug("Timeout reached, no message received")
+                    response = None
+                
+                response_msg = self.response_queue.get(block=True, timeout=remaining_time) 
+                                    
+                matching_msg = next((msg for msg in self.unresponded_messages 
+                                    if ((response_msg.messageType_byte == MessageLogic.message_types[msg.messageType][1] 
+                                        or response_msg.messageType_byte == MessageLogic.message_types[msg.messageType][2])
+                                    and response_msg.decision_byte == msg.decision_byte)), None)
+
+                if matching_msg is not None:
+                    # message received a response
+                    self.unresponded_messages.remove(matching_msg)
+                elif ((response_msg.messageType_byte == MessageLogic.message_types[message.messageType][1] 
+                        or response_msg.messageType_byte == MessageLogic.message_types[message.messageType][2])
                         and response_msg.decision_byte == message.decision_byte):
-                        logging.debug(f"Found matching response for {message}") 
-                        response = response_msg
-                        break
-                    else:
-                        self.responses.append(response_msg)
-                        # Continue waiting for more messages
-                        
-            except queue.Empty:
-                logging.debug("Empty queue")
-                response = None        
-            except Exception as e:
-                logging.error(f"Unexpected exeption: {type(e).__name__}: {e}")
-                raise
+                    logging.debug(f"Found matching response for {message}") 
+                    response = response_msg
+                    break
+                else:
+                    logging.error(f"Unexpected response: message {message.messageType} | response {response_msg.messageType} {response_msg.decision_byte}")
+                    # Continue waiting for more messages
+                    
+        except queue.Empty:
+            logging.debug("Empty queue")
+            response = None        
+        except Exception as e:
+            logging.error(f"Unexpected exeption: {type(e).__name__}: {e}")
+            raise
+        
+        if response is None: 
+            # message received no response
+            self.unresponded_messages.append(message)
+        else:
+            # Clear unresponded messages
+            # Hardware works in FIFO order, so all unresponded_messages won't get a response
+            self.unresponded_messages = []
 
         status = MessageLogic.check_response(message, response)
         if verbose:
@@ -144,10 +146,23 @@ class MitMBoard:
             logger.debug(f"'{message_label}' send status: {status}")
 
         if status == 0:
+            self._set_state(message)
             return 0
         else:
             return 1
 
+    def _set_state(self, message: Message):
+        if message.messageType == "PEV_SIM_CP":
+            self.PEV_SIM_CP_state = ChargingState(message.decision_byte)
+        elif message.messageType == "PEV_SIM_PP":
+            self.PEV_SIM_PP_state = PP_State_PEVsim(message.decision_byte)
+        elif message.messageType == "EVSE_SIM_CP":
+            self.EVSE_SIM_CP_state = message.decision_byte
+        elif message.messageType == "EVSE_SIM_PP":
+            self.EVSE_SIM_PP_state = PP_State_EVSEsim(message.decision_byte)
+        else: 
+            logger.error(f"Can't set state of message {message.messageType}")
+    
     def _listener(self):
         """Continuously read and process messages from the Arduino."""
         if not self.usb.is_initialized():
@@ -161,7 +176,7 @@ class MitMBoard:
                 # Read available bytes
                 data = self.usb.read(3)
                 if not data:
-                    #time.sleep(0.005)
+                    # sleep not needed because usb read waits
                     continue
                 elif len(data) != 3:
                     logger.warning(f"Received invalid message bytes: {data.hex()}")
@@ -191,6 +206,11 @@ class MitMBoard:
         if message.messageType_byte in [ResponseType.NOTIFY_PEV_SIM_CHANGE,
                                          ResponseType.NOTIFY_EVSE_SIM_CHANGE]:
             self.notification_queue.put(message)
+            # update the states 
+            if message.messageType_byte == ResponseType.NOTIFY_PEV_SIM_CHANGE:
+                self.PEV_CP_state = ChargingState(message.decision_byte)
+            elif message.messageType_byte == ResponseType.NOTIFY_EVSE_SIM_CHANGE:
+                self.EVSE_CP_state = message.decision_byte
         else:
             self.response_queue.put(message)
 
@@ -210,12 +230,6 @@ class MitMBoard:
                 self.notification_queue.task_done()
             except queue.Empty:
                 continue
-
-    def _handle_response(self, message: Message):
-        """Handle response messages."""
-        logger.info(f"Received response: {MessageLogic.to_bytes(message).hex()}")
-        self.response_queue.put(message)
-
 
     def wait_for_notification(self, timeout: float = None) -> Optional[Message]:
         """

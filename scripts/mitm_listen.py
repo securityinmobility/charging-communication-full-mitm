@@ -1,63 +1,12 @@
-import sys
-import asyncio
 import os
 import logging
-from datetime import datetime
+import time
 
+from mitm.log import setup_logging
 from mitm.interfaces.usb_interface import UsbInterface 
 from mitm.interfaces.mock_usb import MockUsbInterface 
 from mitm.mitm_board import MitMBoard
 from mitm.messages import Message, MessageLogic, MessageType, ResponseType
-
-def setup_logging(level=logging.INFO):
-    """Configure logging for the entire application."""
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    env_name = os.environ.get("LOG_FILE")
-    
-    main_log = os.path.join(log_dir, env_name if env_name else f"mitm_{timestamp}.log")
-    com_log = os.path.join(log_dir, f"com_{env_name}" if env_name else f"communication_{timestamp}.log")
-
-
-    # Configure Root Logger
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        handlers=[
-            logging.FileHandler(main_log),
-            logging.StreamHandler()
-        ]
-    )
-    
-    # Configure a dedicated communication Logger
-    com_logger = logging.getLogger('communication')
-    com_logger.setLevel(logging.INFO)
-    com_handler = logging.FileHandler(com_log)
-    com_handler.setFormatter(logging.Formatter('%(asctime)s,%(message)s'))
-    com_logger.addHandler(com_handler)
-    com_logger.propagate = False
-    
-
-async def main():
-    logger = logging.getLogger(__name__)
-    logger.info("Starting MitM listen script")
-    
-    usb = UsbInterface(port="/dev/ttyUSB0", baudrate=9600)
-
-    board = MitMBoard(usb_interface=usb)
-    
-    try:
-        # Connect to board
-        await board.connect()
-        board.set_pass_through(True)
-        
-        asyncio.sleep(30) # pause main task
-    except:
-        logger.error(f"An Exception occured")
-    finally:
-        board.close()
 
 if __name__ == "__main__":
     log_level = os.environ.get("LOG_LEVEL", "INFO")
@@ -68,10 +17,42 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
 
     try:
-        logger.info("MITM program Started")
-        asyncio.run(main())
-        logger.info("MitM program terminated")
+        logger.info("MITM Started")
+        logger.info("Starting MitM program")
+        
+        usb_impl = os.environ.get("USB", "mock")
+        
+        if usb_impl == "mock":
+            usb = MockUsbInterface(port="/dev/ttyUSB0", baudrate=9600, error_on_first_message=False)
+        else:
+            usb = UsbInterface(port=usb_impl, baudrate=9600)
+
+        board = MitMBoard(usb_interface=usb)
+        
+        # Connect to board
+        board.connect()
+        board.set_pass_through(True)
+        
+        # set EVSE Sim CP to DC +12V
+        base_EVSE_Sim_CP = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=100)
+        status = board.send_message(base_EVSE_Sim_CP, verbose=True, wait_response=0.3, message_label="base_EVSE_Sim_CP")
+        
+        # set PEV Sim PP to signal plug connected to EV
+        base_EVSE_Sim_PP = Message(messageType="EVSE_SIM_PP", messageType_byte=MessageType.EVSE_SIM_PP, decision_byte=0x01)
+        status = board.send_message(base_EVSE_Sim_PP, verbose=True, wait_response=0.3, message_label="base_EVSE_Sim_PP")
+
+        # set PEV Sim to no EV connected - let the EV initialise the communication
+        base_PEV_Sim_CP = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=0x00)
+        status = board.send_message(base_PEV_Sim_CP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_CP")
+
+        # set EVSE Sim PP to signal a 20A cable - may be changed
+        base_PEV_Sim_PP = Message(messageType="PEV_SIM_PP" , messageType_byte=MessageType.PEV_SIM_PP, decision_byte=0x00)
+        status = board.send_message(base_PEV_Sim_PP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_PP")
+        
+        time.sleep(30) # pause main task
     except KeyboardInterrupt:
         logger.debug("MitM program terminated manually")
     finally:
+        board.close()
+        logger.info("MitM program terminated")
         logging.shutdown()

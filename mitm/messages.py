@@ -70,7 +70,7 @@ class Message:
     end_byte: int = 0xFF # End byte is always 0xFF
 
 class MessageLogic:
-    """Factory class."""
+    """Base message class."""
     message_types = {
         "PEV_SIM_CP": (MessageType.PEV_SIM_CP, ResponseType.ACK_PEV_SIM_CP, ResponseType.NACK_PEV_SIM_CP),
         "EVSE_SIM_CP": (MessageType.EVSE_SIM_CP, ResponseType.ACK_EVSE_SIM_CP, ResponseType.NACK_EVSE_SIM_CP),
