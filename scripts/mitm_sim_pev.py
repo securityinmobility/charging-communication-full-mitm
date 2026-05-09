@@ -8,6 +8,23 @@ from mitm.interfaces.mock_usb import MockUsbInterface
 from mitm.mitm_board import MitMBoard
 from mitm.messages import Message, MessageLogic, MessageType, ResponseType
 
+class MitmBoard_pev_sim(MitMBoard):
+    def handle_notification(self):
+        """
+        Handle notification messages.
+        Just logging.
+        """
+
+        while not self._stop_event.is_set():
+            try:
+                message = self.notification_queue.get(timeout=0.5)
+                logger.info(f"Handle notification {message.messageType}")
+                self.notification_queue.task_done()
+            except queue.Empty:
+                continue
+
+
+
 if __name__ == "__main__":
     log_level = os.environ.get("LOG_LEVEL", "INFO")
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
@@ -33,24 +50,24 @@ if __name__ == "__main__":
         board.connect()
         board.set_pass_through(True)
         
-        # set PEV Sim to simulate no EV connected to the EVSE (State A) - PEV will initiate the communication
-        base_PEV_Sim_CP = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=0x00)
-        # send two times because the first message is never acknowleged
-        status = board.send_message(base_PEV_Sim_CP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_CP")
-        status = board.send_message(base_PEV_Sim_CP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_CP")
-
-        # set PEV Sim PP to signal a 20A cable connected to the EVSE - may be changed
-        base_PEV_Sim_PP = Message(messageType="PEV_SIM_PP" , messageType_byte=MessageType.PEV_SIM_PP, decision_byte=0x01)
-        status = board.send_message(base_PEV_Sim_PP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_PP")
-
         # set EVSE Sim CP to DC +12V - waiting for PEV
         base_EVSE_Sim_CP = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=100)
         # send two times because first one is not acknowleged
+        status = board.send_message(base_EVSE_Sim_CP, verbose=True, wait_response=0.3, message_label="base_EVSE_Sim_CP")
         status = board.send_message(base_EVSE_Sim_CP, verbose=True, wait_response=0.3, message_label="base_EVSE_Sim_CP")
         
         # set EVSE Sim PP to signal plug connected to EV
         base_EVSE_Sim_PP = Message(messageType="EVSE_SIM_PP", messageType_byte=MessageType.EVSE_SIM_PP, decision_byte=0x01)
         status = board.send_message(base_EVSE_Sim_PP, verbose=True, wait_response=0.3, message_label="base_EVSE_Sim_PP")
+
+        # set PEV Sim to simulate an EV connected to the EVSE (State B)
+        base_PEV_Sim_CP = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=0x01)
+        # send two times because the first message is never acknowleged
+        status = board.send_message(base_PEV_Sim_CP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_CP")
+
+        # set PEV Sim PP to signal a 20A cable connected to the EVSE - may be changed
+        base_PEV_Sim_PP = Message(messageType="PEV_SIM_PP" , messageType_byte=MessageType.PEV_SIM_PP, decision_byte=0x01)
+        status = board.send_message(base_PEV_Sim_PP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_PP")
         
         time.sleep(30) # pause main task
     except KeyboardInterrupt:
