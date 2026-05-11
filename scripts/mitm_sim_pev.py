@@ -1,6 +1,7 @@
 import os
 import logging
 import time
+import queue
 
 from mitm.log import setup_logging
 from mitm.interfaces.usb_interface import UsbInterface 
@@ -35,7 +36,7 @@ if __name__ == "__main__":
 
     try:
         logger.info("MITM Started")
-        logger.info("Starting MitM program")
+        logger.info("Starting mitm_sim_pev")
         
         usb_impl = os.environ.get("USB", "mock")
         
@@ -44,7 +45,7 @@ if __name__ == "__main__":
         else:
             usb = UsbInterface(port=usb_impl, baudrate=9600)
 
-        board = MitMBoard(usb_interface=usb)
+        board = MitmBoard_pev_sim(usb_interface=usb)
         
         # Connect to board
         board.connect()

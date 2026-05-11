@@ -18,7 +18,7 @@ if __name__ == "__main__":
 
     try:
         logger.info("MITM Started")
-        logger.info("Starting MitM program")
+        logger.info("Starting mitm_listen")
         
         usb_impl = os.environ.get("USB", "mock")
         
