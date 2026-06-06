@@ -78,6 +78,18 @@ class MitMBoard:
             Status code of the send operation (0: success, 1: error)
         """
         
+        # Empty response_queue before sending the message
+        while not self.response_queue.empty():
+            response_msg = self.response_queue.get()
+            matching_msg = next((msg for msg in self.unresponded_messages 
+                                if ((response_msg.messageType_byte == MessageLogic.message_types[msg.messageType][1] 
+                                    or response_msg.messageType_byte == MessageLogic.message_types[msg.messageType][2])
+                                    and response_msg.decision_byte == msg.decision_byte)), None)
+
+            if matching_msg is not None:
+                self.unresponded_messages.remove(matching_msg)
+
+        # Send message
         data = MessageLogic.to_bytes(message)
         with self.serial_lock:
             self.usb.write(data)
@@ -98,21 +110,19 @@ class MitMBoard:
                     response = None
                 
                 response_msg = self.response_queue.get(block=True, timeout=remaining_time) 
-                                    
-                matching_msg = next((msg for msg in self.unresponded_messages 
-                                    if ((response_msg.messageType_byte == MessageLogic.message_types[msg.messageType][1] 
-                                        or response_msg.messageType_byte == MessageLogic.message_types[msg.messageType][2])
-                                    and response_msg.decision_byte == msg.decision_byte)), None)
 
-                if matching_msg is not None:
-                    # message received a response
-                    self.unresponded_messages.remove(matching_msg)
-                elif ((response_msg.messageType_byte == MessageLogic.message_types[message.messageType][1] 
+                if ((response_msg.messageType_byte == MessageLogic.message_types[message.messageType][1] 
                         or response_msg.messageType_byte == MessageLogic.message_types[message.messageType][2])
                         and response_msg.decision_byte == message.decision_byte):
                     logging.debug(f"Found matching response for {message}") 
                     response = response_msg
                     break
+                elif next((msg for msg in self.unresponded_messages 
+                                    if ((response_msg.messageType_byte == MessageLogic.message_types[msg.messageType][1] 
+                                        or response_msg.messageType_byte == MessageLogic.message_types[msg.messageType][2])
+                                        and response_msg.decision_byte == msg.decision_byte)), None) is not None:
+                    # Previous message received a response
+                    self.unresponded_messages.remove(matching_msg)
                 else:
                     logging.error(f"Unexpected response: message {message.messageType} | response {response_msg.messageType} {response_msg.decision_byte}")
                     # Continue waiting for more messages

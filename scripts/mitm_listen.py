@@ -36,21 +36,21 @@ if __name__ == "__main__":
         # set PEV Sim to simulate no EV connected to the EVSE (State A) - PEV will initiate the communication
         base_PEV_Sim_CP = Message(messageType="PEV_SIM_CP", messageType_byte=MessageType.PEV_SIM_CP, decision_byte=0x00)
         # send two times because the first message is never acknowleged
-        status = board.send_message(base_PEV_Sim_CP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_CP")
-        status = board.send_message(base_PEV_Sim_CP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_CP")
+        status = board.send_message(base_PEV_Sim_CP, verbose=True, wait_response=0.1, message_label="base_PEV_Sim_CP")
+        status = board.send_message(base_PEV_Sim_CP, verbose=True, wait_response=0.1, message_label="base_PEV_Sim_CP")
 
         # set PEV Sim PP to signal a 20A cable connected to the EVSE - may be changed
         base_PEV_Sim_PP = Message(messageType="PEV_SIM_PP" , messageType_byte=MessageType.PEV_SIM_PP, decision_byte=0x01)
-        status = board.send_message(base_PEV_Sim_PP, verbose=True, wait_response=0.3, message_label="base_PEV_Sim_PP")
+        status = board.send_message(base_PEV_Sim_PP, verbose=True, wait_response=0.1, message_label="base_PEV_Sim_PP")
 
         # set EVSE Sim CP to DC +12V - waiting for PEV
         base_EVSE_Sim_CP = Message(messageType="EVSE_SIM_CP", messageType_byte=MessageType.EVSE_SIM_CP, decision_byte=100)
         # send two times because first one is not acknowleged
-        status = board.send_message(base_EVSE_Sim_CP, verbose=True, wait_response=0.3, message_label="base_EVSE_Sim_CP")
+        status = board.send_message(base_EVSE_Sim_CP, verbose=True, wait_response=0.1, message_label="base_EVSE_Sim_CP")
         
         # set EVSE Sim PP to signal plug connected to EV
         base_EVSE_Sim_PP = Message(messageType="EVSE_SIM_PP", messageType_byte=MessageType.EVSE_SIM_PP, decision_byte=0x01)
-        status = board.send_message(base_EVSE_Sim_PP, verbose=True, wait_response=0.3, message_label="base_EVSE_Sim_PP")
+        status = board.send_message(base_EVSE_Sim_PP, verbose=True, wait_response=0.1, message_label="base_EVSE_Sim_PP")
         
         time.sleep(30) # pause main task
     except KeyboardInterrupt:
